@@ -5,6 +5,13 @@ offers, and where the people inside that organisation manage their own developme
 
 **Live: https://qampelo-collab.github.io/pmi-partner-hub-demo/**
 
+| Link | URL | What it opens |
+|---|---|---|
+| Demo | `https://qampelo-collab.github.io/pmi-partner-hub-demo/` | The pmi.org gateway, then the hub as the product |
+| Review | `https://qampelo-collab.github.io/pmi-partner-hub-demo/hub.html?review=1` | The same hub with the review layer on |
+
+The reviewer link does not pass through the gateway.
+
 The live URL opens a recreation of the pmi.org homepage carrying the enterprise entry point.
 Every route into the hub goes through it, so that promoting the hub also promotes pmi.org.
 The hub itself is **`hub.html`** — one self-contained HTML file, no framework, no build step,
@@ -46,8 +53,9 @@ assessed gaps, six illustrated role guides, and the capability map.
 
 ## Review mode
 
-`hub.html` carries an optional review layer. **It is off by default** — the hub opens as the
-product. The switch in the header (or the `R` key) turns it on; then every section carries a
+`hub.html` carries an optional review layer, reached only through the reviewer link. **On the
+plain URL there is nothing to turn on**: no switch in the header, no Review menu, no comment
+buttons. Add `?review=1` and the switch appears, the `R` key works, every section carries a
 comment button, and comments get a verdict, an importance, a name and a timestamp.
 
 Comments live in the reviewer's own browser. There is no server, so consolidating several
@@ -58,8 +66,8 @@ them there. **How to review**, in the hub's Review menu, explains the whole loop
 
     https://qampelo-collab.github.io/pmi-partner-hub-demo/hub.html?review=1
 
-The plain `hub.html` URL stays the product — it opens on the dashboard and says nothing about
-reviewing unless somebody reaches for the switch.
+The plain `hub.html` URL stays the product. It opens on the dashboard and carries no review
+furniture at all.
 
 Reviewer links issued before 27 Aug 2026 pointed at `/?review=1` and now land on the pmi.org
 gateway instead. Reissue them with `hub.html`.
@@ -70,6 +78,7 @@ gateway instead. Reissue them with `hub.html`.
 |---|---|
 | `index.html` | **The pmi.org gateway.** What the live URL serves. A prototype recreation of the pmi.org homepage with an Enterprise Login in the header, an enterprise band under the hero and a footer entry, each routing to `hub.html`. Not the real pmi.org, and it says so on the page. |
 | `hub.html` | **The current build.** The hub itself. Includes the review layer, off by default. |
+| `versions/v7.html` | The build reviewed on 27 Aug 2026, kept so those comments still have their anchors. |
 | `versions/v6.html` | The same product without the review layer. |
 | `versions/v4.2.html` | Three admin roles, organisation structure, escalation. |
 | `versions/v4.html` | Assessments, commercial layer, learner access model. |
