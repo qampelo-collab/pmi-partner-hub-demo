@@ -14849,6 +14849,1651 @@ solCardLearner = function(sid){
   REVIEW.on = false;
 })();
 
+
+/* ============================================================================
+   v12 — PRODUCT BUNDLES, LIMITED-TIME PROMOTIONS, AND ONE-CLICK ENROLMENT
+   01 Sep 2026.
+
+   Two things were asked for, and they turn out to be one chain:
+
+     PMI publishes a bundle or a promotion
+       → the customer's administrator sees it and wraps it into an internal
+         package with its own enrolment window
+         → the package is sent as an invitation the recipient can accept from
+           inside the email in one click
+           → a seat is consumed and the enrolment is on the record.
+
+   Both layers are built, because a promotion nobody can act on is a price list
+   and an invitation with nothing attached is an account request.
+
+   Every figure, price, discount and window below is invented for this
+   prototype. None of it is PMI list pricing or a PMI commercial term.
+
+   Design decisions worth knowing before reading the code:
+
+   1. A promotion above the discount threshold cannot go live on its own. It
+      enters an approval queue with the reason stated. The threshold is data
+      (OFF_RULES), not a hard-coded number.
+   2. Promotions do not stack by default. Where two apply, the best single one
+      applies and the product says which one lost. Stacking is a per-promotion
+      opt-in and is visible in the offer's own row.
+   3. A cap is a real counter, not a label. When it is exhausted the promotion
+      stops applying, in the plan and in the basket.
+   4. The one-click enrolment link does not enrol on the GET. Corporate mail
+      security scanners follow every link in an inbound message before the
+      recipient sees it; a link that enrols when it is fetched would enrol
+      people who never opened the mail. The token opens a confirmation page
+      and the enrolment completes there. See OFF_TOKEN_RULES.
+   ========================================================================= */
+
+(function injectV12CSS(){
+  const st = document.createElement('style');
+  st.textContent = `
+    .offstrip{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px}
+    .offcard{flex:1 1 250px; min-width:0; border:1px solid var(--line); border-radius:12px;
+      background:var(--surface); padding:13px 15px; display:flex; flex-direction:column; gap:6px}
+    .offcard .oc-t{font-size:13.5px; font-weight:680; line-height:1.35}
+    .offcard .oc-d{font-size:11.5px; color:var(--muted); line-height:1.5}
+    .offcard .oc-l{font-size:11.5px; color:var(--ink-2); line-height:1.6}
+    .offcard .oc-f{display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; margin-top:auto; padding-top:9px}
+    .offcard .oc-p{font-size:16px; font-weight:750; letter-spacing:-.01em}
+    .offcard s{color:var(--muted); font-weight:400; font-size:12.5px}
+    .promobadge{display:inline-flex; align-items:center; gap:5px; font-size:10.5px; font-weight:700;
+      letter-spacing:.02em; padding:3px 8px; border-radius:20px; margin-bottom:7px;
+      background:rgba(213,52,11,.10); color:#B72A08; border:1px solid rgba(213,52,11,.28)}
+    .promobadge.ent{background:rgba(0,121,158,.10); color:#00647F; border-color:rgba(0,121,158,.28)}
+    .capbar{height:6px; border-radius:4px; background:var(--line-soft); overflow:hidden; min-width:80px}
+    .capbar i{display:block; height:100%; border-radius:4px}
+    .mailwrap{border:1px solid var(--line); border-radius:12px; overflow:hidden; background:#fff}
+    .mailmeta{background:var(--line-soft); padding:11px 15px; font-size:11.5px; color:var(--muted); line-height:1.7}
+    .mailmeta b{color:var(--ink); font-weight:650}
+    .mailbody{padding:22px 24px; font-size:13px; line-height:1.6; color:#200F3B}
+    .mailbody h4{font-size:16px; margin:0 0 10px; letter-spacing:-.01em}
+    .mailbody p{margin:0 0 12px}
+    .mailrule{height:3px; background:linear-gradient(90deg,#4F17A8,#00799E,#05BFE0,#FF610F,#D5340B)}
+    .maillogo{font-size:11px; font-weight:750; letter-spacing:.1em; text-transform:uppercase; color:#4F17A8; margin-bottom:14px}
+    .mailbtn{display:inline-block; background:#4F17A8; color:#fff; font-weight:650; font-size:13.5px;
+      padding:12px 22px; border-radius:9px; text-decoration:none; border:none; cursor:pointer}
+    .mailbtn.sec{background:transparent; color:#4F17A8; border:1px solid rgba(79,23,168,.35); font-weight:600; padding:11px 18px}
+    .mailfoot{padding:14px 24px 20px; font-size:10.5px; color:#5A5A6E; line-height:1.6; border-top:1px solid var(--line-soft)}
+    .landing{border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--surface)}
+    .landbar{background:var(--line-soft); padding:8px 14px; font-size:11px; color:var(--muted);
+      font-family:var(--mono,ui-monospace,SFMono-Regular,Menlo,monospace); display:flex; align-items:center; gap:8px}
+    .landbody{padding:26px 24px; text-align:center}
+    .landbody h4{font-size:17px; margin:12px 0 6px}
+    .landbody p{font-size:12.5px; color:var(--muted); margin:0 auto 4px; max-width:420px; line-height:1.6}
+    @media (max-width:680px){ .mailbody{padding:18px 16px} .offcard{flex:1 1 100%} }`;
+  document.head.appendChild(st);
+})();
+
+Object.assign(ICON, {
+  tag:'<path d="M20.6 13.4 12 22l-9-9V4h9z"/><circle cx="7.5" cy="7.5" r="1.4"/>',
+  gift:'<rect x="3" y="8" width="18" height="13" rx="2"/><path d="M3 12h18"/><path d="M12 8v13"/><path d="M12 8S9.5 3.5 7.5 4.5 8 8 12 8zm0 0s2.5-4.5 4.5-3.5S16 8 12 8z"/>'
+});
+
+/* ---------- the prototype clock ----------
+   Windows are read against a fixed date so the demo does not rot: a promotion
+   written to close in October 2026 should still read as open when this file is
+   opened later. Stated in the product wherever a countdown appears. */
+const OFF_NOW = new Date(2026, 8, 1);
+const OFF_MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const offDate = s => { const p = String(s).split('-'); return new Date(+p[0], +p[1]-1, +p[2]); };
+const offFmt  = s => { const d = offDate(s); return `${String(d.getDate()).padStart(2,'0')} ${OFF_MON[d.getMonth()]} ${d.getFullYear()}`; };
+const offDays = s => Math.round((offDate(s) - OFF_NOW) / 86400000);
+function offWindow(o){ return `${offFmt(o.from)} — ${offFmt(o.to)}`; }
+/** Days left, or null when the window has not opened or has closed. */
+function offLeft(o){ const a = offDays(o.from), b = offDays(o.to); return a > 0 || b < 0 ? null : b; }
+
+/* ---------- the rules the commercial layer is held to ---------- */
+const OFF_RULES = {
+  maxPct:        15,        /* a price promotion above this needs approval */
+  maxGiveaway:   250000,    /* so does an entitlement worth more than this, illustrative */
+  stackDefault:  false,     /* best single offer wins unless a promotion opts in */
+  tokenDays:     14,        /* one-click invitation link lifetime */
+  undoHours:     24         /* enrolment reversal window */
+};
+
+/* ---------- PMI-published bundles ---------- */
+let OFF_BUNDLES = [
+  {id:'bd-pmo', n:'PMO Excellence Launch Pack', ic:'pmo', c:'#FF610F',
+   d:'Everything a group PMO needs to start: the credential for the leaders, the maturity baseline, and the role journeys behind both.',
+   lines:[{sid:'pmocp', qty:25}, {sid:'pmomat', qty:1}, {sid:'paths', qty:25}],
+   pct:12, plans:['enterprise'], from:'2026-09-01', to:'2027-03-31', status:'live', by:'PMI Commercial'},
+
+  {id:'bd-ai', n:'AI Delivery Starter', ic:'ai', c:'#05BFE0',
+   d:'Readiness first, then the method credential for the people who will run AI projects, then the practitioner series for everyone else.',
+   lines:[{sid:'airead', qty:1}, {sid:'cpmai', qty:10}, {sid:'aiseries', qty:100}],
+   pct:15, plans:['enterprise','business'], from:'2026-09-01', to:'2026-12-31', status:'live', by:'PMI Commercial'},
+
+  {id:'bd-cert5', n:'Certify five, prepare five', ic:'award', c:'#4F17A8',
+   d:'The most common first purchase for a small team, with exam preparation attached rather than sold separately.',
+   lines:[{sid:'pmp', qty:5}, {sid:'studyhall', qty:5}],
+   pct:8, plans:['business'], from:'2026-08-15', to:'2026-11-30', status:'live', by:'PMI Commercial'},
+
+  {id:'bd-sust', n:'Sustainability Wave 1', ic:'leaf', c:'#00799E',
+   d:'Credential the delivery champions, then put the pathway in front of the wider population. Drafted for the FY27 window.',
+   lines:[{sid:'cspp', qty:40}, {sid:'sustpath', qty:120}],
+   pct:10, plans:['enterprise'], from:'2026-10-01', to:'2027-06-30', status:'draft', by:'PMI Commercial'}
+];
+
+/* ---------- limited-time promotions ----------
+   kind: 'price' moves money. 'entitlement' gives something that is not a
+   discount — a seat, a retake, a trial, more time. The distinction matters
+   because an entitlement promotion consumes inventory rather than margin. */
+let OFF_PROMOS = [
+  {id:'pr-pmo-q4', n:'PMO autumn window', kind:'price', lever:'pct', value:12,
+   scope:{type:'domain', ids:['pmo']}, plans:['enterprise'], minQty:10,
+   from:'2026-08-25', to:'2026-10-15', cap:{unit:'seats', limit:400, used:118},
+   stack:false, code:'PMO-AUT26', status:'live', by:'M. Rahms', approved:'auto',
+   why:'Attaches to the PMO Excellence Launch Pack and the customer’s own PMO maturity finding.'},
+
+  {id:'pr-sh-with-pmp', n:'Study Hall with every PMP seat', kind:'entitlement', lever:'bonus', value:1,
+   bonusSid:'studyhall', scope:{type:'solution', ids:['pmp']}, plans:['enterprise','business'], minQty:1,
+   from:'2026-09-01', to:'2026-12-31', cap:{unit:'seats', limit:300, used:64},
+   stack:true, code:'PMP-PREP26', status:'live', by:'PMI Commercial', approved:'auto',
+   why:'Preparation attached to the credential raises pass rates; the give-away is inventory, not margin.'},
+
+  {id:'pr-cpmai-25', n:'CPMAI 25% launch offer', kind:'price', lever:'pct', value:25,
+   scope:{type:'solution', ids:['cpmai']}, plans:['enterprise'], minQty:25,
+   from:'2026-09-15', to:'2026-11-15', cap:{unit:'seats', limit:250, used:0},
+   stack:false, code:'CPMAI-25', status:'pending', by:'M. Rahms', approved:null,
+   why:'Northwind declined CPMAI at list twice. 25% is above the threshold and is deliberately going through approval.'},
+
+  {id:'pr-retake', n:'Waived exam retake', kind:'entitlement', lever:'retake', value:1,
+   scope:{type:'domain', ids:['core']}, plans:['enterprise','business'], minQty:1,
+   from:'2026-09-15', to:'2026-11-15', cap:{unit:'retakes', limit:500, used:0},
+   stack:true, code:'RETAKE26', status:'scheduled', by:'PMI Commercial', approved:'auto',
+   why:'Removes the one objection that stops a nervous candidate booking an exam date.'},
+
+  {id:'pr-inf-trial', n:'Infinity 30-day trial seats', kind:'entitlement', lever:'trial', value:250,
+   scope:{type:'solution', ids:['infinity']}, plans:['enterprise'], minQty:1,
+   from:'2026-09-01', to:'2026-10-31', cap:{unit:'trial seats', limit:250, used:250},
+   stack:true, code:'INF-TRIAL', status:'live', by:'M. Rahms', approved:'auto',
+   why:'Adoption is the whole argument for Infinity. Cap is fully drawn — it no longer applies.'},
+
+  {id:'pr-biz-cert', n:'Small-team certification window', kind:'price', lever:'pct', value:10,
+   scope:{type:'solution', ids:['pmp','capm','acp']}, plans:['business'], minQty:3,
+   from:'2026-08-20', to:'2026-11-30', cap:{unit:'seats', limit:200, used:42},
+   stack:false, code:'SMB-AUT26', status:'live', by:'PMI Commercial', approved:'auto',
+   why:'A business-plan buyer has no negotiation and no procurement. A published window is the only lever they can act on themselves.'},
+
+  {id:'pr-summer', n:'Summer certification window', kind:'price', lever:'pct', value:10,
+   scope:{type:'domain', ids:['core']}, plans:['enterprise','business'], minQty:5,
+   from:'2026-06-01', to:'2026-08-31', cap:{unit:'seats', limit:600, used:412},
+   stack:false, code:'SUM26', status:'ended', by:'PMI Commercial', approved:'auto',
+   why:'Closed 31 Aug. Kept visible because the orders it priced are still on the record.'}
+];
+
+/* ---------- the customer's own layer ----------
+   The administrator cannot change PMI's price. What they can do is decide who
+   inside their organisation gets what, from when to when, and whether people
+   may take it without asking. That is a different object, and it is theirs. */
+let OFF_PKGS = [
+  {id:'pkg-pmo', n:'PMO leaders — autumn intake', ic:'pmo', c:'#FF610F',
+   d:'For anyone holding a PMO role in Group Programme Office or the Digital Delivery Office. Built on the PMI PMO Excellence Launch Pack.',
+   from:'2026-09-01', to:'2026-10-31', units:['gpo','ddo'], source:'bd-pmo',
+   lines:[{sid:'pmocp', qty:1}, {sid:'paths', qty:1}], seats:40, taken:12,
+   selfServe:true, approver:'Priya Raman', status:'open'},
+
+  {id:'pkg-ai', n:'AI in delivery — open to everyone', ic:'ai', c:'#05BFE0',
+   d:'The practitioner series, no approval needed. The CPMAI credential inside it still routes to the Capability Manager.',
+   from:'2026-09-01', to:'2026-12-15', units:['gpo','ddo','sys','mob','git','mfg'], source:'bd-ai',
+   lines:[{sid:'aiseries', qty:1}], seats:600, taken:214,
+   selfServe:true, approver:null, status:'open'},
+
+  {id:'pkg-pmp', n:'PMP cohort — January exam window', ic:'award', c:'#4F17A8',
+   d:'Nominated candidates only. Study Hall attaches automatically while the PMI promotion runs.',
+   from:'2026-10-01', to:'2026-11-15', units:['gpo','sys','mob'], source:null,
+   lines:[{sid:'pmp', qty:1}, {sid:'studyhall', qty:1}], seats:60, taken:0,
+   selfServe:false, approver:'Jordan Avery', status:'scheduled'},
+
+  {id:'pkg-esg', n:'ESG champions — closed', ic:'leaf', c:'#00799E',
+   d:'Ran through the summer. Kept for the record; the seats it used are on AGR-2291.',
+   from:'2026-05-01', to:'2026-07-31', units:['sys','mfg'], source:null,
+   lines:[{sid:'sustpath', qty:1}], seats:80, taken:73,
+   selfServe:true, approver:null, status:'closed'}
+];
+
+/* ---------- invitation campaigns ---------- */
+const OFF_TOKEN_RULES = [
+  ['key',   'Signed, single-use, tied to one address',
+   'The link carries a signed token bound to the invited address and to one package. Using it consumes it. Forwarding the mail does not transfer the seat.'],
+  ['shield','The click does not enrol — the confirmation does',
+   'Corporate mail security fetches every link in an inbound message before the recipient ever sees it. A link that enrolled on being fetched would enrol people who never opened the mail. The link opens a confirmation page; enrolment completes there.'],
+  ['clock', `Expires after ${OFF_RULES.tokenDays} days, undo for ${OFF_RULES.undoHours} hours`,
+   'An expired link asks for a new one rather than failing silently. An enrolment can be reversed by the learner or the administrator within a day, and the seat returns to the pool.'],
+  ['users', 'Enrolment is not consent',
+   'A seat is allocated and a record created. The learner still makes their own data-sharing choice at first sign-in, and nothing is visible to their manager before they do.']
+];
+
+let OFF_CAMPAIGNS = [
+  {id:'CMP-1043', n:'PMO leaders — autumn intake', pkg:'pkg-pmo', mode:'oneclick',
+   audience:'PMO role holders · Group Programme Office, Digital Delivery Office',
+   sent:184, delivered:181, opened:132, enrolled:96, expired:0, undone:2,
+   from:'2026-09-01', to:'2026-10-31', status:'Running', by:'Jordan Avery'},
+
+  {id:'CMP-1041', n:'AI in delivery — all units', pkg:'pkg-ai', mode:'oneclick',
+   audience:'Everyone in a delivery role · all six units',
+   sent:1240, delivered:1226, opened:702, enrolled:214, expired:31, undone:5,
+   from:'2026-09-01', to:'2026-12-15', status:'Running', by:'Jordan Avery'},
+
+  {id:'CMP-1036', n:'ESG champions', pkg:'pkg-esg', mode:'register',
+   audience:'Nominated by unit heads · Systems, Manufacturing Operations',
+   sent:80, delivered:80, opened:71, enrolled:73, expired:0, undone:0,
+   from:'2026-05-01', to:'2026-07-31', status:'Closed', by:'Jordan Avery'}
+];
+
+/* ============================ resolution ============================
+   Which offers apply, to what, and which one wins. Kept in one place so the
+   catalogue, the plan, the basket and the PMI view cannot disagree.
+   ================================================================= */
+
+const offBundle  = id => OFF_BUNDLES.find(b => b.id === id) || null;
+const offPromo   = id => OFF_PROMOS.find(p => p.id === id) || null;
+const offPkg     = id => OFF_PKGS.find(p => p.id === id) || null;
+const offCap     = p => p.cap ? Math.max(0, p.cap.limit - p.cap.used) : Infinity;
+const offCapPct  = p => p.cap ? Math.min(100, Math.round(p.cap.used / p.cap.limit * 100)) : 0;
+
+/** A promotion is only usable when it is live, inside its window and not capped out. */
+function offActive(p){
+  if(p.status !== 'live') return false;
+  if(offLeft(p) === null) return false;
+  return offCap(p) > 0;
+}
+/** Which plan is the person currently looking at the hub as. */
+function offPlanId(){
+  return (typeof ROLE !== 'undefined' && ROLE === 'business') ? 'business' : 'enterprise';
+}
+/** Does a promotion reach this solution? */
+function offHits(p, sid){
+  const s = SOLUTIONS.find(x => x.id === sid);
+  if(!s) return false;
+  const sc = p.scope || {};
+  if(sc.type === 'solution') return sc.ids.includes(sid);
+  if(sc.type === 'domain')   return sc.ids.includes(s.d);
+  if(sc.type === 'bundle')   return sc.ids.some(bid => (offBundle(bid)||{lines:[]}).lines.some(l => l.sid === sid));
+  return sc.type === 'all';
+}
+/** Every usable promotion touching this solution for this plan and quantity. */
+function offPromosFor(sid, qty, planId){
+  const plan = planId || offPlanId();
+  return OFF_PROMOS.filter(p =>
+    offActive(p) && p.plans.includes(plan) && offHits(p, sid) && (qty || 1) >= (p.minQty || 1));
+}
+/** Bundles a plan can see right now. */
+function offBundlesFor(planId){
+  const plan = planId || offPlanId();
+  return OFF_BUNDLES.filter(b => b.status === 'live' && b.plans.includes(plan) && offLeft(b) !== null);
+}
+/** List value of a bundle, its bundle price, and what that saves. */
+function offBundlePrice(b){
+  const gross = b.lines.reduce((s,l) => {
+    const sol = SOLUTIONS.find(x => x.id === l.sid), p = sol ? priceOf(sol) : null;
+    return s + ((p && p.amt ? p.amt : 0) * l.qty);
+  }, 0);
+  const net = Math.round(gross * (100 - b.pct) / 100);
+  return {gross, net, saving: gross - net};
+}
+/** What a promotion is worth on one plan line, and how to say it in one phrase. */
+function offValueOn(p, line){
+  const qty = line.qty || 1, unit = line.unit || 0;
+  if(p.kind === 'price'){
+    const amt = p.lever === 'pct' ? Math.round(unit * qty * p.value / 100) : Math.round(p.value * qty);
+    return {money: amt, label: p.lever === 'pct' ? `${p.value}% off` : `${money(p.value)} off each`};
+  }
+  if(p.lever === 'bonus'){
+    const b = SOLUTIONS.find(x => x.id === p.bonusSid), bp = b ? priceOf(b) : null;
+    const each = bp && bp.amt ? bp.amt : 0;
+    const n = Math.min(qty * p.value, offCap(p));
+    return {money: 0, seats: n, sid: p.bonusSid, worth: each * n,
+            label: `${n} × ${b ? b.n.split('—')[0].trim() : p.bonusSid} included`};
+  }
+  if(p.lever === 'retake') return {money:0, label:'Exam retake waived'};
+  if(p.lever === 'trial')  return {money:0, label:`${p.value} trial seats, 30 days`};
+  if(p.lever === 'validity') return {money:0, label:`Validity extended by ${p.value} months`};
+  return {money:0, label:p.n};
+}
+
+/**
+ * Resolve the offers on a set of plan lines.
+ * Price promotions do not stack unless they opt in: the best single
+ * non-stacking promotion applies per line and the runners-up are reported so
+ * the product can say what lost rather than quietly dropping it.
+ */
+function offResolve(lines, planId){
+  const applied = [], notApplied = [], entitlements = [];
+  let price = 0;
+  lines.forEach(l => {
+    const hits = offPromosFor(l.sid, l.qty, planId);
+    const priceHits = hits.filter(p => p.kind === 'price');
+    const entHits   = hits.filter(p => p.kind === 'entitlement');
+    const scored = priceHits.map(p => ({p, v: offValueOn(p, l)})).sort((a,b) => b.v.money - a.v.money);
+    const stacking = scored.filter(x => x.p.stack);
+    const best     = scored.filter(x => !x.p.stack)[0] || null;
+    const winners  = stacking.concat(best ? [best] : []);
+    winners.forEach(w => { price += w.v.money; applied.push({sid:l.sid, promo:w.p, val:w.v}); });
+    scored.filter(x => !x.p.stack && x !== best).forEach(x =>
+      notApplied.push({sid:l.sid, promo:x.p, val:x.v, why:`Superseded by ${best.p.n}`}));
+    entHits.forEach(p => entitlements.push({sid:l.sid, promo:p, val:offValueOn(p, l)}));
+  });
+  return {price, applied, notApplied, entitlements};
+}
+
+/* Representative unit price across a promotion's scope — used only to size the
+   give-away for the approval rule. Illustrative, like everything else here. */
+function offScopeUnits(p){
+  const ids = SOLUTIONS.filter(s => offHits(p, s.id)).map(s => s.id);
+  const amts = ids.map(id => { const q = priceOf(SOLUTIONS.find(x => x.id === id)); return q && q.amt ? q.amt : 0; })
+                  .filter(Boolean);
+  return amts.length ? Math.round(amts.reduce((a,b) => a+b, 0) / amts.length) : 0;
+}
+function offGiveaway(p){
+  const cap = p.cap ? p.cap.limit : 100, unit = offScopeUnits(p);
+  if(p.kind === 'price') return p.lever === 'pct' ? Math.round(unit * cap * p.value / 100) : p.value * cap;
+  if(p.lever === 'bonus'){ const b = SOLUTIONS.find(x => x.id === p.bonusSid), q = b ? priceOf(b) : null; return (q && q.amt ? q.amt : 0) * cap; }
+  if(p.lever === 'trial') return 0;
+  return Math.round(unit * cap * 0.15);
+}
+/** Why a promotion cannot publish itself. Empty array means it can. */
+function offNeedsApproval(p){
+  const r = [];
+  if(p.kind === 'price' && p.lever === 'pct' && p.value > OFF_RULES.maxPct)
+    r.push(`${p.value}% is above the ${OFF_RULES.maxPct}% threshold a Partner Success Manager can approve alone`);
+  const g = offGiveaway(p);
+  if(g > OFF_RULES.maxGiveaway)
+    r.push(`Exposure at full cap is ${money0(g)}, above the ${money0(OFF_RULES.maxGiveaway)} threshold`);
+  return r;
+}
+
+const OFF_ST = {
+  live:['good','Live'], scheduled:['warn','Scheduled'], pending:['warn','Awaiting approval'],
+  draft:['','Draft'], ended:['','Ended'], rejected:['crit','Rejected'],
+  open:['good','Open'], closed:['','Closed']
+};
+function offChip(status){
+  const s = OFF_ST[status] || ['', status];
+  return `<span class="chip sm ${s[0]}">${s[0] === 'good' ? '<i></i>' : ''}${s[1]}</span>`;
+}
+function offScopeLabel(p){
+  const sc = p.scope || {};
+  if(sc.type === 'all') return 'Everything in the catalogue';
+  if(sc.type === 'domain') return sc.ids.map(id => domById(id).short).join(', ') + ' domain';
+  if(sc.type === 'bundle') return sc.ids.map(id => (offBundle(id)||{n:id}).n).join(', ');
+  return sc.ids.map(id => { const s = SOLUTIONS.find(x => x.id === id); return s ? s.n.split('—')[0].trim() : id; }).join(', ');
+}
+function offLeverLabel(p){
+  if(p.kind === 'price') return p.lever === 'pct' ? `${p.value}% off` : `${money(p.value)} off each`;
+  if(p.lever === 'bonus'){ const b = SOLUTIONS.find(x => x.id === p.bonusSid); return `+${p.value} × ${b ? b.n.split('—')[0].trim() : p.bonusSid} per seat`; }
+  if(p.lever === 'retake') return 'Exam retake waived';
+  if(p.lever === 'trial') return `${p.value} trial seats · 30 days`;
+  return `Validity +${p.value} months`;
+}
+function offCapCell(p){
+  if(!p.cap) return '<span class="sub">No cap</span>';
+  const pctv = offCapPct(p), col = pctv >= 100 ? '#B72A08' : pctv >= 75 ? '#B0790C' : '#166F4A';
+  return `<div style="display:flex;align-items:center;gap:8px">
+    <span class="capbar" style="flex:1"><i style="width:${pctv}%;background:${col}"></i></span>
+    <span class="mono" style="font-size:11.5px;white-space:nowrap">${p.cap.used}/${p.cap.limit}</span></div>
+    <div class="sub" style="font-size:11px">${esc(p.cap.unit)}${pctv >= 100 ? ' · exhausted' : ''}</div>`;
+}
+
+/* ============================ PMI: Offers & promotions ============================ */
+STATE.offTab = 'bundles';
+function offSetTab(t){ STATE.offTab = t; go('poffers'); }
+
+VIEWS.poffers = () => {
+  const liveB = OFF_BUNDLES.filter(b => b.status === 'live').length;
+  const liveP = OFF_PROMOS.filter(offActive).length;
+  const queue = OFF_PROMOS.filter(p => p.status === 'pending');
+  const exposure = OFF_PROMOS.filter(p => p.status === 'live' || p.status === 'scheduled')
+                             .reduce((s,p) => s + offGiveaway(p), 0);
+  const tabs = [['bundles','Bundles', OFF_BUNDLES.length], ['promos','Promotions', OFF_PROMOS.length],
+                ['approvals','Approvals', queue.length || ''], ['reach','Where this lands','']];
+  return `
+  <div class="pagehead">
+    <div><div class="crumbs">PMI internal · Commercial</div>
+      <h1>Offers &amp; promotions</h1>
+      <p class="sub">Bundles and time-limited promotions PMI publishes into this account's hub. What is live here is what the customer sees in their catalogue, their plan and their basket.</p></div>
+    <div class="actions">
+      <button class="btn btn-ghost" data-act="off-newb">${svg('plus',15)} New bundle</button>
+      <button class="btn btn-primary" data-act="off-newp">${svg('tag',15)} New promotion</button>
+    </div>
+  </div>
+
+  <div class="notice" style="margin-bottom:16px">${svg('lock',15)}<span><b>PMI internal.</b> Every price, discount and window below is invented for this prototype. Nothing here is PMI list pricing or a PMI commercial term.</span></div>
+
+  <div class="grid g-4" style="margin-bottom:18px">
+    <div class="kpi"><div class="lab">Live bundles</div><div class="val">${liveB}</div><div class="delta flat">${OFF_BUNDLES.length - liveB} draft or ended</div></div>
+    <div class="kpi"><div class="lab">Live promotions</div><div class="val">${liveP}</div><div class="delta flat">${OFF_PROMOS.filter(p=>p.status==='scheduled').length} scheduled</div></div>
+    <div class="kpi"><div class="lab">Awaiting approval</div><div class="val">${queue.length}</div><div class="delta flat" style="color:${queue.length?"#8A5E08":"var(--muted)"}">${queue.length ? 'Cannot go live until decided' : 'Queue clear'}</div></div>
+    <div class="kpi"><div class="lab">Exposure at full cap</div><div class="val">${money0(exposure)}</div><div class="delta flat">Illustrative, live and scheduled</div></div>
+  </div>
+
+  <div class="tabs">${tabs.map(t => `<button class="tab ${STATE.offTab===t[0]?'on':''}" onclick="offSetTab('${t[0]}')">${t[1]}${t[2]!==''?`<span class="n">${t[2]}</span>`:''}</button>`).join('')}</div>
+
+  ${STATE.offTab === 'bundles' ? offBundlesTab() : ''}
+  ${STATE.offTab === 'promos' ? offPromosTab() : ''}
+  ${STATE.offTab === 'approvals' ? offApprovalsTab() : ''}
+  ${STATE.offTab === 'reach' ? offReachTab() : ''}`;
+};
+
+function offBundlesTab(){
+  return `
+  <div class="card">
+    <div class="card-h"><div><h3>Bundles</h3><div class="sub">A fixed set of lines at a bundle price. The customer adds the whole thing to their plan in one action.</div></div></div>
+    <div class="card-b tight"><table class="tbl">
+      <thead><tr><th>Bundle</th><th>Contents</th><th class="num">List</th><th class="num">Bundle price</th><th class="num">Saving</th><th>Plans</th><th>Window</th><th>Status</th><th></th></tr></thead>
+      <tbody>${OFF_BUNDLES.map(b => {
+        const p = offBundlePrice(b), left = offLeft(b);
+        return `<tr>
+          <td><div class="strong">${esc(b.n)}</div><div class="sub">${esc(b.d.slice(0,78))}${b.d.length>78?'…':''}</div></td>
+          <td class="sub">${b.lines.map(l => `${l.qty} × ${esc((SOLUTIONS.find(x=>x.id===l.sid)||{n:l.sid}).n.split('—')[0].trim())}`).join('<br>')}</td>
+          <td class="num mono"><s style="color:var(--muted)">${money0(p.gross)}</s></td>
+          <td class="num mono strong">${money0(p.net)}</td>
+          <td class="num mono" style="color:#166F4A;white-space:nowrap">−${money0(p.saving)}<div class="sub">${b.pct}%</div></td>
+          <td>${b.plans.map(x => `<span class="chip sm">${x === 'business' ? 'Business' : 'Enterprise'}</span>`).join(' ')}</td>
+          <td class="sub">${offWindow(b)}${left !== null ? `<div class="sub" style="font-size:11px">${left} days left · prototype clock</div>` : ''}</td>
+          <td>${offChip(b.status)}</td>
+          <td style="white-space:nowrap">
+            ${b.status === 'live'
+              ? `<button class="btn btn-sm btn-quiet" data-act="off-bstatus" data-id="${esc(b.id)}" data-to="draft">Pause</button>`
+              : b.status === 'draft'
+                ? `<button class="btn btn-sm btn-primary" data-act="off-bstatus" data-id="${esc(b.id)}" data-to="live">Publish</button>`
+                : ''}
+            <button class="btn btn-sm btn-ghost" data-act="off-bpreview" data-id="${esc(b.id)}">Preview</button>
+          </td></tr>`;
+      }).join('')}</tbody></table></div>
+  </div>
+  <p class="hint" style="margin-top:12px">Publishing a bundle changes what the customer sees on their next screen — there is no approval step, because a bundle at or below the standard discount ladder gives nothing away that volume would not.</p>`;
+}
+
+function offPromosTab(){
+  return `
+  <div class="card">
+    <div class="card-h"><div><h3>Promotions</h3><div class="sub">Time-boxed, capped, and either priced or given. A promotion that cannot be tracked to a cap is a discount policy, not a promotion.</div></div></div>
+    <div class="card-b tight"><table class="tbl">
+      <thead><tr><th>Promotion</th><th>Applies to</th><th>Lever</th><th>Window</th><th style="min-width:150px">Cap</th><th>Stacks</th><th>Status</th><th></th></tr></thead>
+      <tbody>${OFF_PROMOS.map(p => {
+        const left = offLeft(p);
+        return `<tr>
+          <td><div class="strong">${esc(p.n)}</div><div class="sub mono" style="font-size:11px">${esc(p.code)}</div></td>
+          <td class="sub">${esc(offScopeLabel(p))}<div class="sub" style="font-size:11px">${p.plans.map(x=>x==='business'?'Business':'Enterprise').join(' + ')}${p.minQty>1?` · from ${p.minQty} units`:''}</div></td>
+          <td><span class="chip sm ${p.kind === 'price' ? '' : 'tan'}">${p.kind === 'price' ? svg('tag',11) : svg('gift',11)} ${esc(offLeverLabel(p))}</span></td>
+          <td class="sub">${offWindow(p)}${left !== null ? `<div class="sub" style="font-size:11px">${left} days left</div>` : ''}</td>
+          <td>${offCapCell(p)}</td>
+          <td>${p.stack ? '<span class="chip sm">Stacks</span>' : '<span class="sub">Best offer only</span>'}</td>
+          <td>${offChip(p.status)}</td>
+          <td style="white-space:nowrap">
+            ${p.status === 'live' ? `<button class="btn btn-sm btn-quiet" data-act="off-pstatus" data-id="${esc(p.id)}" data-to="draft">Pause</button>` : ''}
+            ${p.status === 'draft' || p.status === 'scheduled' ? `<button class="btn btn-sm btn-primary" data-act="off-submit" data-id="${esc(p.id)}">Publish</button>` : ''}
+            ${p.status === 'pending' ? `<button class="btn btn-sm btn-ghost" onclick="offSetTab('approvals')">In queue</button>` : ''}
+            <button class="btn btn-sm btn-ghost" data-act="off-pwhy" data-id="${esc(p.id)}">Why</button>
+          </td></tr>`;
+      }).join('')}</tbody></table></div>
+  </div>
+  <div class="notice info" style="margin-top:14px">${svg('info',16)}<div><b>Promotions do not stack by default.</b> Where two price promotions reach the same line, the better one applies and the customer is told which one did not. Stacking is opted into per promotion — the two entitlement promotions above stack because a free retake and a free preparation seat are not the same give.</div></div>`;
+}
+
+function offApprovalsTab(){
+  const queue = OFF_PROMOS.filter(p => p.status === 'pending');
+  const decided = OFF_PROMOS.filter(p => p.approved && p.approved !== 'auto');
+  return `
+  <div class="grid g-32">
+    <div class="stack">
+      <div class="card">
+        <div class="card-h"><div><h3>Waiting on a decision</h3><div class="sub">A promotion in this queue is not visible to the customer and cannot be applied to a quote</div></div></div>
+        <div class="card-b">
+          ${queue.length ? queue.map(p => `
+            <div class="card" style="box-shadow:none;background:var(--bg);padding:16px;margin-bottom:12px">
+              <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+                <b style="font-size:14px">${esc(p.n)}</b>
+                <span class="chip sm warn">Submitted by ${esc(p.by)}</span>
+              </div>
+              <div class="sub" style="margin-bottom:10px">${esc(offScopeLabel(p))} · ${esc(offLeverLabel(p))} · ${offWindow(p)} · cap ${p.cap.limit} ${esc(p.cap.unit)}</div>
+              <div class="notice warn" style="margin-bottom:12px">${svg('warn',16)}<div><b>Why this needs a decision.</b><br>${offNeedsApproval(p).map(esc).join('<br>')}</div></div>
+              <p style="font-size:12.5px;line-height:1.6;margin:0 0 12px"><b>Case made:</b> ${esc(p.why)}</p>
+              <div class="f2" style="margin-bottom:10px">
+                <div><div class="sub">Exposure at full cap</div><div class="mono strong" style="font-size:16px">${money0(offGiveaway(p))}</div></div>
+                <div><div class="sub">Threshold</div><div class="mono" style="font-size:16px">${money0(OFF_RULES.maxGiveaway)} · ${OFF_RULES.maxPct}%</div></div>
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn btn-sm btn-primary" data-act="off-approve" data-id="${esc(p.id)}">${svg('check',13)} Approve and publish</button>
+                <button class="btn btn-sm btn-quiet" data-act="off-reject" data-id="${esc(p.id)}">Reject</button>
+              </div>
+            </div>`).join('') : `<div class="empty">Nothing waiting. A promotion at or below ${OFF_RULES.maxPct}% and under ${money0(OFF_RULES.maxGiveaway)} of exposure publishes without one.</div>`}
+        </div>
+      </div>
+      ${decided.length ? `
+      <div class="card">
+        <div class="card-h"><div><h3>Decided</h3><div class="sub">This session</div></div></div>
+        <div class="card-b tight">${decided.map(p => `
+          <div class="li" style="padding:12px 18px;border-bottom:1px solid var(--line-soft)">
+            <span style="flex:1"><span class="t">${esc(p.n)}</span><span class="d">${esc(offLeverLabel(p))} · ${esc(p.approved)}</span></span>
+            <span class="r">${offChip(p.status)}</span></div>`).join('')}</div>
+      </div>` : ''}
+    </div>
+    <div class="stack">
+      <div class="card">
+        <div class="card-h"><h3>The rule</h3></div>
+        <div class="card-b">
+          <dl class="kv">
+            <dt>Approve alone up to</dt><dd class="mono">${OFF_RULES.maxPct}%</dd>
+            <dt>Exposure ceiling</dt><dd class="mono">${money0(OFF_RULES.maxGiveaway)}</dd>
+            <dt>Default stacking</dt><dd>${OFF_RULES.stackDefault ? 'Stacks' : 'Best offer only'}</dd>
+          </dl>
+          <p class="hint" style="margin-top:10px">Both numbers are data, not code. Moving them moves what a Partner Success Manager can do without asking, which is the point of having them in one place.</p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h3>What approval does not cover</h3></div>
+        <div class="card-b">
+          <ul class="list-clean">
+            ${[['doc','Issued quotes','A promotion that ends does not reprice a quote already issued. The quote carries its own terms.'],
+               ['clock','Orders already placed','The cap counts what has been drawn. Reversing an order returns to the cap, not to the customer.'],
+               ['users','Who is eligible','Eligibility is set on the promotion. Approval is about exposure, not audience.']
+              ].map(r => `<li class="li"><span class="ic">${svg(r[0],15)}</span>
+                <span style="flex:1"><span class="t">${r[1]}</span><span class="d">${r[2]}</span></span></li>`).join('')}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function offReachTab(){
+  const steps = [
+    ['tag','1 · Published here','A bundle or promotion goes live against one or both plans, inside a window and under a cap.'],
+    ['grid','2 · The customer sees it','Live bundles head the solution catalogue. A promoted solution carries a badge on its card, in both plans.'],
+    ['cart','3 · It applies where money is decided','In the enterprise plan on the quote; in the business plan in the basket and at checkout. Best offer only unless it stacks.'],
+    ['doc','4 · It lands on the record','The order carries the promotion code and the amount given. The cap counter moves with it.']
+  ];
+  return `
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h"><div><h3>Where a published offer lands</h3><div class="sub">Four surfaces, one source. Nothing below re-derives a price of its own.</div></div></div>
+    <div class="card-b"><div class="grid g-4" style="gap:11px">
+      ${steps.map(s => `<div class="card" style="box-shadow:none;background:var(--bg);padding:14px">
+        <span style="color:var(--violet);display:block;margin-bottom:7px">${svg(s[0],17)}</span>
+        <b style="font-size:12.5px;display:block;margin-bottom:4px">${esc(s[1])}</b>
+        <span style="font-size:11.5px;color:var(--muted);line-height:1.55">${esc(s[2])}</span></div>`).join('')}
+    </div></div>
+  </div>
+  <div class="grid g-2">
+    <div class="card">
+      <div class="card-h"><div><h3>What the customer does with it</h3><div class="sub">The second layer, inside their own hub</div></div></div>
+      <div class="card-b">
+        <p style="font-size:12.5px;line-height:1.65;margin:0 0 12px">PMI sets the commercial terms. The administrator decides who inside the organisation may take it, from when to when, and whether they need to ask. That is a different object with a different owner — <b>internal packages</b> — and it is what an invitation actually carries.</p>
+        <ul class="list-clean">
+          ${OFF_PKGS.filter(p => p.source).map(p => {
+            const b = offBundle(p.source);
+            return `<li class="li"><span class="ic" style="background:${p.c}1A;color:${inkOf(p.c)}">${svg(p.ic,15)}</span>
+              <span style="flex:1"><span class="t">${esc(p.n)}</span><span class="d">Built on ${esc(b ? b.n : p.source)} · ${p.taken} of ${p.seats} taken</span></span>
+              <span class="r">${offChip(p.status)}</span></li>`;
+          }).join('')}
+        </ul>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><div><h3>What PMI cannot see</h3><div class="sub">Held here, as elsewhere in this view</div></div></div>
+      <div class="card-b">
+        <ul class="list-clean">
+          ${[['Who inside the customer took a package','Aggregate uptake only. Individual enrolment is the customer’s record, not PMI’s.'],
+             ['The customer’s own eligibility rules','PMI sees that a package exists and how much of the pool it draws, not who was excluded from it.'],
+             ['Anything a learner set to private','The v10 visibility ladder governs, and it governs here too.']
+            ].map(r => `<li class="li"><span class="ic">${svg('lock',15)}</span>
+              <span style="flex:1"><span class="t">${r[0]}</span><span class="d">${r[1]}</span></span></li>`).join('')}
+        </ul>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ============================ builders ============================
+   The draft is held outside the DOM so that adding a line does not lose what
+   has already been typed. Text fields are read back before every re-render.
+   ================================================================= */
+let OFF_DB = null, OFF_DP = null;
+const OFF_SELLABLE = SOLUTIONS.filter(s => { const p = priceOf(s); return p && p.amt; });
+
+function offReadB(){
+  if(!OFF_DB) return;
+  const v = id => { const el = document.getElementById(id); return el ? el.value : undefined; };
+  const n = v('obN'); if(n !== undefined) OFF_DB.n = n;
+  const d = v('obD'); if(d !== undefined) OFF_DB.d = d;
+  const p = v('obPct'); if(p !== undefined) OFF_DB.pct = Math.max(0, Math.min(60, parseInt(p,10) || 0));
+  const f = v('obFrom'); if(f !== undefined) OFF_DB.from = f;
+  const t = v('obTo'); if(t !== undefined) OFF_DB.to = t;
+}
+function offBundleModal(){
+  const p = offBundlePrice(OFF_DB);
+  openModal(`
+    <div class="modal-h"><h3 style="font-size:16px">New bundle</h3>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:3px">A fixed set of lines at one price. The customer adds the whole thing in one action, or takes the lines apart and keeps what they want at list.</p></div>
+    <div class="modal-b">
+      <div class="field"><label for="obN">Name</label><input class="txt" id="obN" value="${esc(OFF_DB.n)}" placeholder="PMO Excellence Launch Pack"></div>
+      <div class="field"><label for="obD">What it is for</label><textarea id="obD" placeholder="One sentence a customer would recognise their own problem in.">${esc(OFF_DB.d)}</textarea></div>
+
+      <div class="field"><label>Lines</label>
+        <div style="border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:10px">
+          ${OFF_DB.lines.length ? OFF_DB.lines.map((l,i) => {
+            const s = SOLUTIONS.find(x => x.id === l.sid), q = s ? priceOf(s) : null, unit = q && q.amt ? q.amt : 0;
+            return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line-soft)">
+              <span style="flex:1;font-size:12.5px">${esc(s ? s.n : l.sid)}</span>
+              <span class="mono" style="font-size:12px;color:var(--muted)">${l.qty} × ${money0(unit)}</span>
+              <span class="mono strong" style="font-size:12.5px;min-width:78px;text-align:right">${money0(unit * l.qty)}</span>
+              <button class="btn btn-sm btn-quiet" data-act="off-bline-rm" data-i="${i}">${svg('x',13)}</button>
+            </div>`;
+          }).join('') : '<div class="sub" style="padding:4px 0 8px">No lines yet.</div>'}
+          <div style="display:flex;gap:8px;align-items:flex-end;margin-top:10px;flex-wrap:wrap">
+            <span class="field" style="flex:1;min-width:200px;margin:0"><label for="obSid">Add a solution</label>
+              <select class="sel" id="obSid">${OFF_SELLABLE.map(s => `<option value="${esc(s.id)}">${esc(s.n)}</option>`).join('')}</select></span>
+            <span class="field" style="width:96px;margin:0"><label for="obQty">Quantity</label><input class="txt" id="obQty" value="10"></span>
+            <button class="btn btn-sm btn-ghost" data-act="off-bline-add">${svg('plus',13)} Add</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="f2">
+        <div class="field"><label for="obPct">Bundle discount on list</label><input class="txt" id="obPct" value="${OFF_DB.pct}"><div class="hint">Per cent. A bundle is not approval-gated — it sits inside the standard ladder by design.</div></div>
+        <div class="field"><label>Plans that see it</label>
+          <div style="display:flex;gap:6px;padding:6px 0">
+            ${[['enterprise','Enterprise'],['business','Business']].map(x =>
+              `<button class="fchip ${OFF_DB.plans.includes(x[0])?'on':''}" data-act="off-bplan" data-p="${x[0]}">${x[1]}</button>`).join('')}
+          </div></div>
+      </div>
+      <div class="f2">
+        <div class="field"><label for="obFrom">Opens</label><input class="txt" id="obFrom" value="${esc(OFF_DB.from)}"><div class="hint">YYYY-MM-DD</div></div>
+        <div class="field"><label for="obTo">Closes</label><input class="txt" id="obTo" value="${esc(OFF_DB.to)}"><div class="hint">YYYY-MM-DD</div></div>
+      </div>
+
+      <div class="notice info" style="margin-bottom:0">${svg('info',16)}<div>
+        List value <b class="mono">${money0(p.gross)}</b> · bundle price <b class="mono">${money0(p.net)}</b> · saving <b class="mono">${money0(p.saving)}</b> at ${OFF_DB.pct}%.
+        ${OFF_DB.lines.length ? '' : ' Add at least one line to publish.'}</div></div>
+    </div>
+    <div class="modal-f">
+      <button class="btn btn-primary" data-act="off-bsave" data-to="live">Publish</button>
+      <button class="btn btn-ghost" data-act="off-bsave" data-to="draft">Save as draft</button>
+      <span class="spacer"></span>
+      <button class="btn btn-quiet" onclick="closeAll()">Cancel</button>
+    </div>`);
+}
+action('off-newb', () => {
+  OFF_DB = {id:'bd-' + Date.now().toString(36), n:'', d:'', lines:[], pct:10,
+            plans:['enterprise'], from:'2026-10-01', to:'2027-03-31', status:'draft', ic:'grid', c:'#4F17A8', by:'M. Rahms'};
+  offBundleModal();
+});
+action('off-bline-add', () => {
+  offReadB();
+  const sid = document.getElementById('obSid').value;
+  const qty = Math.max(1, parseInt(document.getElementById('obQty').value, 10) || 1);
+  const ex = OFF_DB.lines.find(l => l.sid === sid);
+  if(ex) ex.qty += qty; else OFF_DB.lines.push({sid, qty});
+  offBundleModal();
+});
+action('off-bline-rm', d => { offReadB(); OFF_DB.lines.splice(parseInt(d.i,10), 1); offBundleModal(); });
+action('off-bplan', d => {
+  offReadB();
+  const i = OFF_DB.plans.indexOf(d.p);
+  if(i < 0) OFF_DB.plans.push(d.p); else if(OFF_DB.plans.length > 1) OFF_DB.plans.splice(i,1);
+  offBundleModal();
+});
+action('off-bsave', d => {
+  offReadB();
+  if(!OFF_DB.n.trim()){ toast('Give the bundle a name'); return; }
+  if(!OFF_DB.lines.length){ toast('A bundle needs at least one line'); return; }
+  OFF_DB.status = d.to;
+  OFF_BUNDLES.unshift(OFF_DB);
+  const n = OFF_DB.n; OFF_DB = null;
+  closeAll(); STATE.offTab = 'bundles'; go('poffers');
+  toast(`${esc(n)} ${d.to === 'live' ? 'published — the customer sees it now' : 'saved as a draft'}`);
+});
+action('off-bstatus', d => {
+  const b = offBundle(d.id); if(!b) return;
+  b.status = d.to; go('poffers');
+  toast(`${esc(b.n)} ${d.to === 'live' ? 'published' : 'paused — removed from the customer’s catalogue'}`);
+});
+action('off-bpreview', d => {
+  const b = offBundle(d.id); if(!b) return;
+  const p = offBundlePrice(b);
+  openModal(`
+    <div class="modal-h"><h3 style="font-size:16px">What the customer sees</h3>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:3px">The card as it renders at the head of their solution catalogue.</p></div>
+    <div class="modal-b">
+      <div class="offstrip"><div class="offcard" style="max-width:340px">
+        <span class="promobadge"><span>${svg('tag',11)}</span> Bundle · ${b.pct}% off list</span>
+        <span class="oc-t">${esc(b.n)}</span>
+        <span class="oc-d">${esc(b.d)}</span>
+        <span class="oc-l">${b.lines.map(l => `${l.qty} × ${esc((SOLUTIONS.find(x=>x.id===l.sid)||{n:l.sid}).n.split('—')[0].trim())}`).join('<br>')}</span>
+        <span class="oc-f"><s>${money0(p.gross)}</s><span class="oc-p">${money0(p.net)}</span>
+          <span class="chip sm">Until ${offFmt(b.to)}</span></span>
+      </div></div>
+      <p class="hint" style="margin-top:12px">Illustrative pricing. The customer's own volume tier still applies underneath — the bundle discount is not additive to it, the better of the two governs.</p>
+    </div>
+    <div class="modal-f"><button class="btn btn-ghost" onclick="closeAll()">Close</button></div>`);
+});
+
+function offReadP(){
+  if(!OFF_DP) return;
+  const v = id => { const el = document.getElementById(id); return el ? el.value : undefined; };
+  const set = (id, key, fn) => { const x = v(id); if(x !== undefined) OFF_DP[key] = fn ? fn(x) : x; };
+  set('opN','n'); set('opCode','code'); set('opFrom','from'); set('opTo','to'); set('opWhy','why');
+  set('opValue','value', x => Math.max(0, parseInt(x,10) || 0));
+  set('opMin','minQty', x => Math.max(1, parseInt(x,10) || 1));
+  const cl = v('opCap'); if(cl !== undefined) OFF_DP.cap.limit = Math.max(1, parseInt(cl,10) || 1);
+}
+const OFF_LEVERS = {
+  price: [['pct','Per cent off'], ['fixed','Fixed amount off each unit']],
+  entitlement: [['bonus','Bonus seats of another product'], ['retake','Exam retake waived'],
+                ['trial','Trial seats, 30 days'], ['validity','Validity extended']]
+};
+function offPromoModal(){
+  const gate = offNeedsApproval(OFF_DP), give = offGiveaway(OFF_DP);
+  const scopeOpts = OFF_DP.scope.type === 'domain' ? DOMAINS.map(d => [d.id, d.name])
+                  : OFF_DP.scope.type === 'bundle' ? OFF_BUNDLES.map(b => [b.id, b.n])
+                  : OFF_SELLABLE.map(s => [s.id, s.n]);
+  openModal(`
+    <div class="modal-h"><h3 style="font-size:16px">New promotion</h3>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:3px">Time-boxed and capped. A promotion above the threshold goes to approval rather than live — the form will say so before you submit it.</p></div>
+    <div class="modal-b">
+      <div class="f2">
+        <div class="field"><label for="opN">Name</label><input class="txt" id="opN" value="${esc(OFF_DP.n)}" placeholder="PMO autumn window"></div>
+        <div class="field"><label for="opCode">Code on the order</label><input class="txt" id="opCode" value="${esc(OFF_DP.code)}"></div>
+      </div>
+      <div class="f2">
+        <div class="field"><label for="opKind">What it gives</label>
+          <select class="sel" id="opKind" onchange="offPSet('kind',this.value)">
+            <option value="price" ${OFF_DP.kind==='price'?'selected':''}>A price movement</option>
+            <option value="entitlement" ${OFF_DP.kind==='entitlement'?'selected':''}>An entitlement — something extra, not a discount</option>
+          </select></div>
+        <div class="field"><label for="opLever">Lever</label>
+          <select class="sel" id="opLever" onchange="offPSet('lever',this.value)">
+            ${OFF_LEVERS[OFF_DP.kind].map(l => `<option value="${l[0]}" ${OFF_DP.lever===l[0]?'selected':''}>${l[1]}</option>`).join('')}
+          </select></div>
+      </div>
+      <div class="f2">
+        <div class="field"><label for="opValue">${OFF_DP.lever === 'pct' ? 'Per cent' : OFF_DP.lever === 'fixed' ? 'Amount off each unit' : OFF_DP.lever === 'bonus' ? 'Bonus seats per seat bought' : OFF_DP.lever === 'trial' ? 'Trial seats' : 'Months added'}</label>
+          <input class="txt" id="opValue" value="${OFF_DP.value}"></div>
+        ${OFF_DP.lever === 'bonus' ? `
+        <div class="field"><label for="opBonus">Bonus product</label>
+          <select class="sel" id="opBonus" onchange="offPSet('bonusSid',this.value)">
+            ${OFF_SELLABLE.map(s => `<option value="${esc(s.id)}" ${OFF_DP.bonusSid===s.id?'selected':''}>${esc(s.n)}</option>`).join('')}
+          </select></div>` : `
+        <div class="field"><label for="opMin">Applies from</label><input class="txt" id="opMin" value="${OFF_DP.minQty}"><div class="hint">Minimum units on the line.</div></div>`}
+      </div>
+      <div class="f2">
+        <div class="field"><label for="opScopeT">Applies to</label>
+          <select class="sel" id="opScopeT" onchange="offPSet('scopeType',this.value)">
+            ${[['solution','One solution'],['domain','A whole domain'],['bundle','A bundle'],['all','Everything']].map(x =>
+              `<option value="${x[0]}" ${OFF_DP.scope.type===x[0]?'selected':''}>${x[1]}</option>`).join('')}
+          </select></div>
+        ${OFF_DP.scope.type === 'all' ? '<div class="field"><label>&nbsp;</label><div class="hint" style="padding-top:11px">Every priced solution in the catalogue.</div></div>' : `
+        <div class="field"><label for="opScopeI">Which one</label>
+          <select class="sel" id="opScopeI" onchange="offPSet('scopeId',this.value)">
+            ${scopeOpts.map(o => `<option value="${esc(o[0])}" ${OFF_DP.scope.ids[0]===o[0]?'selected':''}>${esc(o[1])}</option>`).join('')}
+          </select></div>`}
+      </div>
+      <div class="f2">
+        <div class="field"><label for="opFrom">Opens</label><input class="txt" id="opFrom" value="${esc(OFF_DP.from)}"><div class="hint">YYYY-MM-DD</div></div>
+        <div class="field"><label for="opTo">Closes</label><input class="txt" id="opTo" value="${esc(OFF_DP.to)}"><div class="hint">YYYY-MM-DD</div></div>
+      </div>
+      <div class="f2">
+        <div class="field"><label for="opCap">Cap</label><input class="txt" id="opCap" value="${OFF_DP.cap.limit}"><div class="hint">${esc(OFF_DP.cap.unit)}. When it is drawn the promotion stops applying.</div></div>
+        <div class="field"><label>Plans and stacking</label>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;padding:6px 0">
+            ${[['enterprise','Enterprise'],['business','Business']].map(x =>
+              `<button class="fchip ${OFF_DP.plans.includes(x[0])?'on':''}" data-act="off-pplan" data-p="${x[0]}">${x[1]}</button>`).join('')}
+            <button class="fchip ${OFF_DP.stack?'on':''}" data-act="off-pstack">${OFF_DP.stack ? 'Stacks with others' : 'Best offer only'}</button>
+          </div></div>
+      </div>
+      <div class="field"><label for="opWhy">The case for it</label><textarea id="opWhy" placeholder="What this unlocks that list pricing does not.">${esc(OFF_DP.why)}</textarea></div>
+
+      <div class="notice ${gate.length ? 'warn' : 'info'}" style="margin-bottom:0">${svg(gate.length ? 'warn' : 'info',16)}<div>
+        ${gate.length
+          ? `<b>This will go to approval, not live.</b><br>${gate.map(esc).join('<br>')}`
+          : `<b>This can publish immediately.</b> Exposure at full cap is ${money0(give)}, inside the ${money0(OFF_RULES.maxGiveaway)} ceiling${OFF_DP.kind === 'price' && OFF_DP.lever === 'pct' ? ` and ${OFF_DP.value}% is at or under ${OFF_RULES.maxPct}%` : ''}.`}
+      </div></div>
+    </div>
+    <div class="modal-f">
+      <button class="btn btn-primary" data-act="off-psave">${gate.length ? 'Submit for approval' : 'Publish'}</button>
+      <button class="btn btn-ghost" data-act="off-psave" data-draft="1">Save as draft</button>
+      <span class="spacer"></span>
+      <button class="btn btn-quiet" onclick="closeAll()">Cancel</button>
+    </div>`);
+}
+action('off-newp', () => {
+  OFF_DP = {id:'pr-' + Date.now().toString(36), n:'', kind:'price', lever:'pct', value:10,
+            scope:{type:'domain', ids:['pmo']}, plans:['enterprise'], minQty:10, bonusSid:'studyhall',
+            from:'2026-10-01', to:'2026-12-31', cap:{unit:'seats', limit:250, used:0},
+            stack:false, code:'NEW-26', status:'draft', by:'M. Rahms', approved:null, why:''};
+  offPromoModal();
+});
+function offPSet(k, v){
+  offReadP();
+  const d = {k};
+  if(d.k === 'kind'){ OFF_DP.kind = v; OFF_DP.lever = OFF_LEVERS[v][0][0]; OFF_DP.value = v === 'price' ? 10 : 1; }
+  else if(d.k === 'lever'){
+    OFF_DP.lever = v;
+    OFF_DP.cap.unit = v === 'retake' ? 'retakes' : v === 'trial' ? 'trial seats' : 'seats';
+    if(v === 'trial') OFF_DP.value = 100;
+  }
+  else if(d.k === 'scopeType'){
+    OFF_DP.scope.type = v;
+    OFF_DP.scope.ids = v === 'domain' ? ['pmo'] : v === 'bundle' ? [(OFF_BUNDLES[0]||{id:''}).id] : v === 'all' ? [] : [OFF_SELLABLE[0].id];
+  }
+  else if(d.k === 'scopeId') OFF_DP.scope.ids = [v];
+  else if(d.k === 'bonusSid') OFF_DP.bonusSid = v;
+  offPromoModal();
+}
+action('off-pplan', d => {
+  offReadP();
+  const i = OFF_DP.plans.indexOf(d.p);
+  if(i < 0) OFF_DP.plans.push(d.p); else if(OFF_DP.plans.length > 1) OFF_DP.plans.splice(i,1);
+  offPromoModal();
+});
+action('off-pstack', () => { offReadP(); OFF_DP.stack = !OFF_DP.stack; offPromoModal(); });
+action('off-psave', d => {
+  offReadP();
+  if(!OFF_DP.n.trim()){ toast('Give the promotion a name'); return; }
+  const gate = offNeedsApproval(OFF_DP);
+  OFF_DP.status = d.draft ? 'draft' : gate.length ? 'pending' : (offDays(OFF_DP.from) > 0 ? 'scheduled' : 'live');
+  OFF_DP.approved = gate.length ? null : 'auto';
+  OFF_PROMOS.unshift(OFF_DP);
+  const p = OFF_DP; OFF_DP = null;
+  closeAll();
+  STATE.offTab = p.status === 'pending' ? 'approvals' : 'promos';
+  go('poffers');
+  toast(p.status === 'pending' ? `${esc(p.n)} sent to approval — ${esc(gate[0])}`
+      : p.status === 'scheduled' ? `${esc(p.n)} scheduled for ${offFmt(p.from)}`
+      : p.status === 'draft' ? `${esc(p.n)} saved as a draft`
+      : `${esc(p.n)} is live — the customer sees it now`);
+});
+action('off-pstatus', d => {
+  const p = offPromo(d.id); if(!p) return;
+  p.status = d.to; go('poffers');
+  toast(`${esc(p.n)} paused — it stops applying to new quotes immediately`);
+});
+action('off-submit', d => {
+  const p = offPromo(d.id); if(!p) return;
+  const gate = offNeedsApproval(p);
+  p.status = gate.length ? 'pending' : (offDays(p.from) > 0 ? 'scheduled' : 'live');
+  if(gate.length) STATE.offTab = 'approvals';
+  go('poffers');
+  toast(gate.length ? `${esc(p.n)} sent to approval — ${esc(gate[0])}` : `${esc(p.n)} published`);
+});
+action('off-approve', d => {
+  const p = offPromo(d.id); if(!p) return;
+  p.status = offDays(p.from) > 0 ? 'scheduled' : 'live';
+  p.approved = 'Approved by Commercial · today';
+  go('poffers');
+  toast(`${esc(p.n)} approved — ${p.status === 'live' ? 'live now' : 'opens ' + offFmt(p.from)}`);
+});
+action('off-reject', d => {
+  const p = offPromo(d.id); if(!p) return;
+  p.status = 'rejected';
+  p.approved = 'Rejected by Commercial · today';
+  go('poffers');
+  toast(`${esc(p.n)} rejected — it stays out of the customer’s view`);
+});
+action('off-pwhy', d => {
+  const p = offPromo(d.id); if(!p) return;
+  const gate = offNeedsApproval(p);
+  openModal(`
+    <div class="modal-h"><h3 style="font-size:16px">${esc(p.n)}</h3>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:3px">${esc(offScopeLabel(p))} · ${esc(offLeverLabel(p))}</p></div>
+    <div class="modal-b">
+      <dl class="kv" style="margin-bottom:14px">
+        <dt>Window</dt><dd>${offWindow(p)}</dd>
+        <dt>Cap</dt><dd class="mono">${p.cap.used} of ${p.cap.limit} ${esc(p.cap.unit)} drawn</dd>
+        <dt>Eligibility</dt><dd>${p.plans.map(x=>x==='business'?'Business plan':'Enterprise plan').join(' + ')}${p.minQty>1?` · from ${p.minQty} units on the line`:''}</dd>
+        <dt>Stacking</dt><dd>${p.stack ? 'Stacks with other offers' : 'Best offer only'}</dd>
+        <dt>Exposure at full cap</dt><dd class="mono">${money0(offGiveaway(p))}</dd>
+        <dt>Approval</dt><dd>${p.approved === 'auto' ? 'Not required — inside the threshold' : esc(p.approved || 'Pending')}</dd>
+      </dl>
+      <p style="font-size:12.5px;line-height:1.65"><b>The case made:</b> ${esc(p.why)}</p>
+      ${gate.length ? `<div class="notice warn" style="margin-top:12px">${svg('warn',16)}<div>${gate.map(esc).join('<br>')}</div></div>` : ''}
+    </div>
+    <div class="modal-f"><button class="btn btn-ghost" onclick="closeAll()">Close</button></div>`);
+});
+
+/* ============================ the customer side ============================
+   One resolution function, four surfaces. None of them price anything of
+   their own.
+   ======================================================================== */
+
+function offCardHTML(b){
+  const p = offBundlePrice(b), left = offLeft(b), plan = offPlanId();
+  return `<div class="offcard">
+    <span class="promobadge">${svg('tag',11)} Bundle · ${b.pct}% off list</span>
+    <span class="oc-t">${esc(b.n)}</span>
+    <span class="oc-d">${esc(b.d)}</span>
+    <span class="oc-l">${b.lines.map(l => `${l.qty} × ${esc((SOLUTIONS.find(x=>x.id===l.sid)||{n:l.sid}).n.split('—')[0].trim())}`).join('<br>')}</span>
+    <span class="oc-f"><s>${money0(p.gross)}</s><span class="oc-p">${money0(p.net)}</span>
+      <span class="chip sm">${left !== null ? left + ' days left' : 'Until ' + offFmt(b.to)}</span>
+      <span style="flex:1"></span>
+      <button class="btn btn-sm btn-primary" data-act="${plan === 'business' ? 'off-tobasket' : 'off-toplan'}" data-id="${esc(b.id)}">Add</button></span>
+  </div>`;
+}
+function offPromoCardHTML(p){
+  const left = offLeft(p);
+  return `<div class="offcard">
+    <span class="promobadge ${p.kind === 'entitlement' ? 'ent' : ''}">${svg(p.kind === 'entitlement' ? 'gift' : 'tag',11)} ${esc(offLeverLabel(p))}</span>
+    <span class="oc-t">${esc(p.n)}</span>
+    <span class="oc-d">${esc(offScopeLabel(p))}${p.minQty > 1 ? ` · from ${p.minQty} units` : ''}</span>
+    <span class="oc-f">
+      <span class="chip sm">${left !== null ? left + ' days left' : 'Opens ' + offFmt(p.from)}</span>
+      <span class="chip sm">${p.cap ? offCap(p) + ' ' + esc(p.cap.unit) + ' left' : 'No cap'}</span>
+      <span style="flex:1"></span>
+      <button class="btn btn-sm btn-ghost" data-act="off-terms" data-id="${esc(p.id)}">Terms</button></span>
+  </div>`;
+}
+/** The strip at the head of the catalogue. Empty when nothing is running. */
+function offStrip(){
+  const plan = offPlanId();
+  const bundles = offBundlesFor(plan);
+  const promos  = OFF_PROMOS.filter(p => offActive(p) && p.plans.includes(plan));
+  if(!bundles.length && !promos.length) return '';
+  return `
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h"><div><h3>Bundles and offers open to you</h3>
+      <div class="sub">Published by PMI for your account. Windows and caps are real — when a cap is drawn the offer stops applying.</div></div>
+      <div class="right"><span class="chip sm">${bundles.length} bundle${bundles.length===1?'':'s'} · ${promos.length} promotion${promos.length===1?'':'s'}</span></div></div>
+    <div class="card-b">
+      <div class="offstrip">${bundles.map(offCardHTML).join('')}${promos.map(offPromoCardHTML).join('')}</div>
+      <p class="hint" style="margin-top:4px">All pricing illustrative. Offers do not stack unless the offer says so — where two apply, the better one is used and the plan shows which one was not.</p>
+    </div>
+  </div>`;
+}
+
+action('off-terms', d => {
+  const p = offPromo(d.id); if(!p) return;
+  openModal(`
+    <div class="modal-h"><h3 style="font-size:16px">${esc(p.n)}</h3>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:3px">Code ${esc(p.code)} · applied automatically, nothing to enter</p></div>
+    <div class="modal-b">
+      <dl class="kv" style="margin-bottom:14px">
+        <dt>What it gives</dt><dd>${esc(offLeverLabel(p))}</dd>
+        <dt>Applies to</dt><dd>${esc(offScopeLabel(p))}</dd>
+        <dt>Minimum</dt><dd>${p.minQty > 1 ? p.minQty + ' units on the line' : 'None'}</dd>
+        <dt>Window</dt><dd>${offWindow(p)}</dd>
+        <dt>Remaining</dt><dd class="mono">${p.cap ? offCap(p) + ' of ' + p.cap.limit + ' ' + esc(p.cap.unit) : 'Uncapped'}</dd>
+        <dt>With other offers</dt><dd>${p.stack ? 'Stacks' : 'Best offer only — this or another, not both'}</dd>
+      </dl>
+      <div class="notice info">${svg('info',16)}<div>Illustrative. A quote already issued keeps the terms it was issued under, whether or not this window is still open.</div></div>
+    </div>
+    <div class="modal-f"><button class="btn btn-ghost" onclick="closeAll()">Close</button></div>`);
+});
+action('off-toplan', d => {
+  const b = offBundle(d.id); if(!b) return;
+  let added = 0;
+  b.lines.forEach(l => {
+    const s = SOLUTIONS.find(x => x.id === l.sid); if(!s) return;
+    const q = priceOf(s), unit = q && q.amt ? q.amt : 0;
+    const ex = CART.find(c => c.sid === l.sid);
+    if(ex){ ex.qty = Math.max(ex.qty, l.qty); }
+    else { CART.push({sid:l.sid, qty:l.qty, term:s.k === 'assess' ? 'One-off' : '24 months', unit, note:b.n}); added++; }
+  });
+  const el = document.getElementById('cartCount'); if(el) el.textContent = CART.length;
+  renderNav(); go('plan');
+  toast(`${esc(b.n)} added — ${added} new line${added===1?'':'s'}, priced at the bundle rate`);
+});
+action('off-tobasket', d => {
+  const b = offBundle(d.id); if(!b) return;
+  b.lines.forEach(l => {
+    if(!SME_CATALOGUE.includes(l.sid)) return;
+    const line = BASKET.find(x => x.sid === l.sid);
+    if(line) line.qty += l.qty; else BASKET.push({sid:l.sid, qty:l.qty, unit:bizUnit(l.sid)});
+  });
+  paintBasketCount();
+  toast(`${esc(b.n)} added to your basket`);
+});
+
+/* ---------- catalogue: the strip, and a badge on the cards it touches ---------- */
+const _vCatalogV12 = VIEWS.catalog;
+VIEWS.catalog = () => {
+  const html = _vCatalogV12(), k = '<div class="domains">', i = html.indexOf(k);
+  return i < 0 ? offStrip() + html : html.slice(0, i) + offStrip() + html.slice(i);
+};
+const _solCardV12 = solCard;
+solCard = function(s){
+  const html = _solCardV12(s);
+  const hits = offPromosFor(s.id, 9999, offPlanId());
+  const inB  = offBundlesFor(offPlanId()).filter(b => b.lines.some(l => l.sid === s.id));
+  if(!hits.length && !inB.length) return html;
+  const badge = hits.length
+    ? `<div class="promobadge ${hits[0].kind === 'entitlement' ? 'ent' : ''}" title="${esc(hits[0].n)} · ends ${offFmt(hits[0].to)}">${svg(hits[0].kind === 'entitlement' ? 'gift' : 'tag',11)} ${esc(offLeverLabel(hits[0]))}</div>`
+    : `<div class="promobadge ent" title="Part of ${esc(inB[0].n)}">${svg('layers',11)} In ${esc(inB[0].n)}</div>`;
+  const k = '<div class="top">', i = html.indexOf(k);
+  return i < 0 ? html : html.slice(0, i) + badge + html.slice(i);
+};
+
+/* ---------- the plan: what applied, what did not, and why ---------- */
+const _planTotalsV12 = planTotals;
+planTotals = function(){
+  const t = _planTotalsV12();
+  const r = offResolve(CART.map(c => ({sid:c.sid, qty:c.qty, unit:c.unit})), 'enterprise');
+  t.offers = r;
+  t.promoVal = r.price;
+  t.total = Math.max(0, t.total - r.price);
+  return t;
+};
+function offPlanRows(t){
+  if(!t.offers) return '';
+  return t.offers.applied.filter(a => a.val.money > 0).map(a => `
+    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:9px;color:#166F4A">
+      <span>${esc(a.promo.n)} <span class="chip sm" style="margin-left:4px">${esc(a.promo.code)}</span></span>
+      <b class="mono">− ${money(a.val.money)}</b></div>`).join('');
+}
+function offPlanCard(){
+  const t = planTotals(), r = t.offers;
+  if(!r || (!r.applied.length && !r.notApplied.length && !r.entitlements.length)) return '';
+  const nameOf = sid => { const s = SOLUTIONS.find(x => x.id === sid); return s ? s.n.split('—')[0].trim() : sid; };
+  return `
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h"><div><h3>Offers on this plan</h3>
+      <div class="sub">Applied automatically from what PMI has published. Nothing to enter, nothing to ask for.</div></div>
+      <div class="right"><span class="chip sm good"><i></i>${money(r.price)} off</span></div></div>
+    <div class="card-b">
+      <ul class="list-clean">
+        ${r.applied.map(a => `<li class="li">
+          <span class="ic" style="background:var(--good-soft);color:#166F4A">${svg(a.promo.kind === 'entitlement' ? 'gift' : 'tag',15)}</span>
+          <span style="flex:1"><span class="t">${esc(a.promo.n)}</span>
+            <span class="d">${esc(nameOf(a.sid))} · ${esc(a.val.label)}${a.promo.stack ? ' · stacks' : ''}</span></span>
+          <span class="r mono">${a.val.money ? '− ' + money(a.val.money) : (a.val.worth ? money(a.val.worth) + ' of value' : 'Included')}</span></li>`).join('')}
+        ${r.entitlements.map(e => `<li class="li">
+          <span class="ic" style="background:rgba(0,121,158,.10);color:#00647F">${svg('gift',15)}</span>
+          <span style="flex:1"><span class="t">${esc(e.promo.n)}</span>
+            <span class="d">${esc(nameOf(e.sid))} · ${esc(e.val.label)}</span></span>
+          <span class="r sub">No price effect</span></li>`).join('')}
+        ${r.notApplied.map(x => `<li class="li">
+          <span class="ic">${svg('info',15)}</span>
+          <span style="flex:1"><span class="t" style="color:var(--muted)">${esc(x.promo.n)}</span>
+            <span class="d">${esc(nameOf(x.sid))} · ${esc(x.why)} — offers do not stack unless they say so</span></span>
+          <span class="r sub">Not applied</span></li>`).join('')}
+      </ul>
+      <p class="hint" style="margin-top:12px">Caps are drawn when an order is placed, not when a quote is requested. A quote issued while an offer is open keeps that offer's terms even if the window closes before the order.</p>
+    </div>
+  </div>`;
+}
+const _vPlanV12 = VIEWS.plan;
+VIEWS.plan = () => {
+  let html = _vPlanV12();
+  const t = planTotals();
+  const rows = offPlanRows(t);
+  const anchor = '<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:9px;color:var(--muted)"><span>Enterprise agreement credit</span>';
+  if(rows && html.indexOf(anchor) >= 0) html = html.replace(anchor, rows + anchor);
+  const k = '<div class="grid g-32">', i = html.indexOf(k);
+  const card = offPlanCard();
+  return (i < 0 || !card) ? card + html : html.slice(0, i) + card + html.slice(i);
+};
+
+/* ---------- business plan: the same offers, priced in the basket ---------- */
+const _basketPricingV12 = basketPricing;
+basketPricing = function(){
+  const p = _basketPricingV12();
+  const r = offResolve(BASKET.map(l => ({sid:l.sid, qty:l.qty, unit:l.unit})), 'business');
+  p.offers = r;
+  p.promo  = r.price;
+  p.net    = Math.max(0, p.net - r.price);
+  return p;
+};
+const _basketSummaryV12 = basketSummaryHTML;
+basketSummaryHTML = function(p){
+  const html = _basketSummaryV12(p);
+  if(!p.offers || !p.offers.applied.length) return html;
+  const rows = p.offers.applied.map(a => `
+      <dt>${esc(a.promo.n)}</dt><dd class="mono" style="color:#166F4A">${a.val.money ? '−' + money0(a.val.money) : esc(a.val.label)}</dd>`).join('');
+  const k = '<dt><b>Total</b></dt>', i = html.indexOf(k);
+  return i < 0 ? html : html.slice(0, i) + rows + html.slice(i);
+};
+const _vBshopV12 = VIEWS.bshop;
+VIEWS.bshop = () => {
+  const html = _vBshopV12(), strip = offStrip();
+  if(!strip) return html;
+  const k = '<div class="card" style="margin-bottom:18px">', i = html.indexOf(k);
+  return i < 0 ? html : html.slice(0, i) + strip + html.slice(i);
+};
+/* Placing an order draws the cap. A quote does not — that is the rule stated
+   on the plan, and this is where it is kept. */
+const _placeOrderV12 = ACTIONS['place-order'];
+ACTIONS['place-order'] = function(){
+  const before = BASKET.map(l => ({sid:l.sid, qty:l.qty, unit:l.unit}));
+  const r = offResolve(before, 'business');
+  const n = BASKET.length;
+  _placeOrderV12.apply(null, arguments);
+  if(BASKET.length < n){
+    r.applied.concat(r.entitlements).forEach(a => {
+      if(!a.promo.cap) return;
+      const drawn = a.val.seats || before.filter(l => l.sid === a.sid).reduce((s,l) => s + l.qty, 0);
+      a.promo.cap.used = Math.min(a.promo.cap.limit, a.promo.cap.used + drawn);
+    });
+  }
+};
+
+/* ============================ the administrator's layer ============================
+   PMI sets the terms. The administrator decides who inside the organisation may
+   take them, between which dates, and whether they have to ask first. That is a
+   package, and a package plus an audience plus a window is a campaign.
+   ================================================================== */
+
+const offPkgLeft = p => offLeft(p);
+function offPkgSeatBar(p){
+  const pctv = Math.min(100, Math.round(p.taken / p.seats * 100));
+  return `<div style="display:flex;align-items:center;gap:9px">
+    <span class="capbar" style="flex:1"><i style="width:${pctv}%;background:${pctv>=90?'#B72A08':'#166F4A'}"></i></span>
+    <span class="mono" style="font-size:11.5px;white-space:nowrap">${p.taken}/${p.seats}</span></div>`;
+}
+function offUnitNames(ids){
+  if(ids.length === ORG.units.length) return 'Everyone, all six units';
+  return ids.map(id => (unitById(id) || {n:id}).n).join(', ');
+}
+
+VIEWS.packages = () => {
+  const open = OFF_PKGS.filter(p => p.status === 'open');
+  const running = OFF_CAMPAIGNS.filter(c => c.status === 'Running');
+  const enrolled = OFF_CAMPAIGNS.filter(c => c.mode === 'oneclick').reduce((s,c) => s + c.enrolled, 0);
+  const seats = OFF_PKGS.reduce((s,p) => s + p.seats, 0), taken = OFF_PKGS.reduce((s,p) => s + p.taken, 0);
+  return `
+  <div class="pagehead">
+    <div><div class="crumbs">Access &amp; entitlements</div>
+      <h1>Packages &amp; campaigns</h1>
+      <p class="sub">Wrap what PMI has made available into something your own people can take: a named package, a window, an audience, and an invitation they can accept from inside the email.</p></div>
+    <div class="actions">
+      <button class="btn btn-ghost" data-act="off-newpkg">${svg('plus',15)} New package</button>
+      <button class="btn btn-primary" data-act="off-newcmp">${svg('mail',15)} Send a campaign</button>
+    </div>
+  </div>
+
+  <div class="grid g-4" style="margin-bottom:18px">
+    <div class="kpi"><div class="lab">Open packages</div><div class="val">${open.length}</div><div class="delta flat">${OFF_PKGS.length - open.length} scheduled or closed</div></div>
+    <div class="kpi"><div class="lab">Seats reserved</div><div class="val">${seats.toLocaleString('en-GB')}</div><div class="delta flat">${taken.toLocaleString('en-GB')} taken</div></div>
+    <div class="kpi"><div class="lab">Campaigns running</div><div class="val">${running.length}</div><div class="delta flat">${OFF_CAMPAIGNS.length} in total</div></div>
+    <div class="kpi"><div class="lab">Enrolled in one click</div><div class="val">${enrolled.toLocaleString('en-GB')}</div><div class="delta flat">From inside the email, no form</div></div>
+  </div>
+
+  ${offStrip()}
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h"><div><h3>Your packages</h3>
+      <div class="sub">Yours, not PMI's. You choose the audience, the window and whether people may take it without asking.</div></div></div>
+    <div class="card-b"><div class="grid g-2">
+      ${OFF_PKGS.map(p => {
+        const left = offPkgLeft(p), src = p.source ? offBundle(p.source) : null;
+        return `<div class="card cardcol" style="box-shadow:none;background:var(--bg)">
+          <div class="card-b">
+            <div style="display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:5px">
+              <span style="width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:${p.c}1A;color:${inkOf(p.c)};flex:none">${svg(p.ic,15)}</span>
+              <b style="font-size:14px;flex:1;min-width:0">${esc(p.n)}</b>
+              ${offChip(p.status)}
+            </div>
+            <p style="font-size:12px;color:var(--muted);line-height:1.55;margin:0 0 10px">${esc(p.d)}</p>
+            <div style="font-size:11.5px;color:var(--ink-2);line-height:1.6;margin-bottom:9px">
+              ${p.lines.map(l => `${l.qty} × ${esc((SOLUTIONS.find(x=>x.id===l.sid)||{n:l.sid}).n.split('—')[0].trim())}`).join(' · ')}
+              ${src ? `<br><span class="sub">From the PMI ${esc(src.n)}</span>` : ''}
+            </div>
+            ${offPkgSeatBar(p)}
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+              <span class="chip sm">${offWindow(p)}</span>
+              ${left !== null ? `<span class="chip sm">${left} days left</span>` : ''}
+              <span class="chip sm">${p.selfServe ? 'Self-service' : 'Nomination only'}</span>
+              ${p.approver ? `<span class="chip sm">Approver ${esc(p.approver)}</span>` : ''}
+            </div>
+            <div class="sub" style="margin-top:8px">${esc(offUnitNames(p.units))}</div>
+            <div class="grow"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+              ${p.status !== 'closed'
+                ? `<button class="btn btn-sm btn-primary" data-act="off-newcmp" data-pkg="${esc(p.id)}">${svg('mail',13)} Invite</button>` : ''}
+              ${p.status === 'open' ? `<button class="btn btn-sm btn-quiet" data-act="off-pkgstatus" data-id="${esc(p.id)}" data-to="closed">Close</button>` : ''}
+              ${p.status === 'scheduled' ? `<button class="btn btn-sm btn-ghost" data-act="off-pkgstatus" data-id="${esc(p.id)}" data-to="open">Open now</button>` : ''}
+            </div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-h"><div><h3>Enrolment campaigns</h3>
+      <div class="sub">What was sent, what was opened, and what turned into a seat</div></div>
+      <div class="right"><button class="btn btn-sm btn-ghost" onclick="toast('Campaign export queued')">${svg('download',13)} Export</button></div></div>
+    <div class="card-b tight"><table class="tbl">
+      <thead><tr><th>Campaign</th><th>Package</th><th>How it enrols</th><th class="num">Sent</th><th class="num">Opened</th><th class="num">Enrolled</th><th class="num">Expired</th><th>Status</th><th></th></tr></thead>
+      <tbody>${OFF_CAMPAIGNS.map(c => {
+        const pk = offPkg(c.pkg), rate = c.sent ? Math.round(c.enrolled / c.sent * 100) : 0;
+        return `<tr>
+          <td><div class="strong">${esc(c.n)}</div><div class="sub mono" style="font-size:11px">${esc(c.id)} · ${esc(c.by)}</div></td>
+          <td class="sub">${esc(pk ? pk.n : c.pkg)}<div class="sub" style="font-size:11px">${esc(c.audience)}</div></td>
+          <td>${c.mode === 'oneclick'
+                ? '<span class="chip sm good"><i></i>One click from the email</span>'
+                : '<span class="chip sm">Register, then redeem</span>'}</td>
+          <td class="num mono">${c.sent.toLocaleString('en-GB')}</td>
+          <td class="num mono">${c.opened.toLocaleString('en-GB')}</td>
+          <td class="num mono strong">${c.enrolled.toLocaleString('en-GB')}<div class="sub" style="font-size:11px">${rate}%</div></td>
+          <td class="num mono">${c.expired}</td>
+          <td>${offChip(c.status === 'Running' ? 'open' : 'closed')}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-sm btn-ghost" data-act="off-mail" data-cid="${esc(c.id)}">View email</button>
+            ${c.status === 'Running' ? `<button class="btn btn-sm btn-quiet" data-act="off-remind" data-cid="${esc(c.id)}">Remind</button>` : ''}
+          </td></tr>`;
+      }).join('')}</tbody></table></div>
+    <div class="card-b" style="padding-top:0">
+      <p class="hint">Enrolment counts can exceed opens on a campaign that also ran through a nomination list — the ESG campaign above is one. Undone enrolments (${OFF_CAMPAIGNS.reduce((s,c)=>s+c.undone,0)} in total) are excluded from the enrolled figure.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-h"><div><h3>How the one-click link works, and what it deliberately does not do</h3>
+      <div class="sub">The part of this feature that is a security decision rather than a convenience</div></div></div>
+    <div class="card-b"><div class="grid g-4" style="gap:11px">
+      ${OFF_TOKEN_RULES.map(r => `<div class="card" style="box-shadow:none;background:var(--bg);padding:14px">
+        <span style="color:var(--violet);display:block;margin-bottom:7px">${svg(r[0],17)}</span>
+        <b style="font-size:12.5px;display:block;margin-bottom:4px">${esc(r[1])}</b>
+        <span style="font-size:11.5px;color:var(--muted);line-height:1.55">${esc(r[2])}</span></div>`).join('')}
+    </div>
+    <div class="notice info" style="margin-top:14px">${svg('info',16)}<div><b>Why not enrol on the click itself.</b> It would be one step shorter and it would not survive contact with a corporate mail gateway. Scanners fetch every link in an inbound message before delivery, so a link that enrolled on being fetched would report enrolments for people who never opened the mail — and it would burn a seat for each one. The confirmation page costs one screen and makes the record true.</div></div>
+    </div>
+  </div>`;
+};
+action('off-pkgstatus', d => {
+  const p = offPkg(d.id); if(!p) return;
+  p.status = d.to; go('packages');
+  toast(`${esc(p.n)} ${d.to === 'open' ? 'opened — people in scope can take it now' : 'closed — unused seats return to the pool'}`);
+});
+action('off-remind', d => {
+  const c = OFF_CAMPAIGNS.find(x => x.id === d.cid); if(!c) return;
+  const target = Math.max(0, c.delivered - c.enrolled - c.expired);
+  toast(`Reminder queued to ${target.toLocaleString('en-GB')} people who have not enrolled — new links, ${OFF_RULES.tokenDays} days`);
+});
+
+/* ---------- package builder ---------- */
+let OFF_DPK = null;
+function offReadPk(){
+  if(!OFF_DPK) return;
+  const v = id => { const el = document.getElementById(id); return el ? el.value : undefined; };
+  const n = v('pkN'); if(n !== undefined) OFF_DPK.n = n;
+  const d = v('pkD'); if(d !== undefined) OFF_DPK.d = d;
+  const f = v('pkFrom'); if(f !== undefined) OFF_DPK.from = f;
+  const t = v('pkTo'); if(t !== undefined) OFF_DPK.to = t;
+  const s = v('pkSeats'); if(s !== undefined) OFF_DPK.seats = Math.max(1, parseInt(String(s).replace(/[^0-9]/g,''),10) || 1);
+}
+function offPkgModal(){
+  openModal(`
+    <div class="modal-h"><h3 style="font-size:16px">New package</h3>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:3px">A named thing your people can take, drawn from seats you already hold or from a PMI bundle you are about to buy.</p></div>
+    <div class="modal-b">
+      <div class="field"><label for="pkN">Name</label><input class="txt" id="pkN" value="${esc(OFF_DPK.n)}" placeholder="PMO leaders — autumn intake"></div>
+      <div class="field"><label for="pkD">Who it is for</label><textarea id="pkD" placeholder="The sentence that goes in the invitation email.">${esc(OFF_DPK.d)}</textarea></div>
+      <div class="f2">
+        <div class="field"><label for="pkSrc">Built on</label>
+          <select class="sel" id="pkSrc" onchange="offPkSetSrc(this.value)">
+            <option value="">Seats we already hold</option>
+            ${offBundlesFor('enterprise').map(b => `<option value="${esc(b.id)}" ${OFF_DPK.source===b.id?'selected':''}>PMI bundle — ${esc(b.n)}</option>`).join('')}
+          </select></div>
+        <div class="field"><label for="pkSeats">Seats reserved</label><input class="txt" id="pkSeats" value="${OFF_DPK.seats}">
+          <div class="hint">Held against the agreement. Unused seats return when the window closes.</div></div>
+      </div>
+      <div class="field"><label>What is in it</label>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding:9px;border:1px solid var(--line);border-radius:8px;background:var(--surface)">
+          ${OFF_SELLABLE.filter(s => ['cert','learn','platform','community'].includes(s.k)).slice(0,14).map(s =>
+            `<button class="fchip ${OFF_DPK.lines.some(l => l.sid === s.id) ? 'on' : ''}" data-act="off-pkline" data-sid="${esc(s.id)}">${esc(s.n.split('—')[0].trim())}</button>`).join('')}
+        </div>
+        <div class="hint">One seat of each per person. ${OFF_DPK.lines.length ? OFF_DPK.lines.length + ' selected.' : 'Nothing selected yet.'}</div>
+      </div>
+      <div class="f2">
+        <div class="field"><label for="pkFrom">Opens</label><input class="txt" id="pkFrom" value="${esc(OFF_DPK.from)}"><div class="hint">YYYY-MM-DD</div></div>
+        <div class="field"><label for="pkTo">Closes</label><input class="txt" id="pkTo" value="${esc(OFF_DPK.to)}"><div class="hint">YYYY-MM-DD</div></div>
+      </div>
+      <div class="field"><label>Who may take it</label>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;padding:6px 0">
+          ${ORG.units.map(u => `<button class="fchip ${OFF_DPK.units.includes(u.id)?'on':''}" data-act="off-pkunit" data-u="${esc(u.id)}">${esc(u.n)}</button>`).join('')}
+        </div></div>
+      <div class="setrow" style="border:none;padding:4px 0">
+        <div class="txtblk"><b>They can take it without asking</b><span>Off means every acceptance routes to the named approver first</span></div>
+        <div class="toggle ${OFF_DPK.selfServe?'on':''}" data-act="off-pkself"><i></i></div>
+      </div>
+    </div>
+    <div class="modal-f">
+      <button class="btn btn-primary" data-act="off-pksave" data-to="open">Open it now</button>
+      <button class="btn btn-ghost" data-act="off-pksave" data-to="scheduled">Schedule</button>
+      <span class="spacer"></span>
+      <button class="btn btn-quiet" onclick="closeAll()">Cancel</button>
+    </div>`);
+}
+action('off-newpkg', () => {
+  OFF_DPK = {id:'pkg-' + Date.now().toString(36), n:'', d:'', ic:'layers', c:'#4F17A8',
+             from:'2026-10-01', to:'2026-12-31', units:['gpo','ddo'], source:null,
+             lines:[], seats:50, taken:0, selfServe:true, approver:'Jordan Avery', status:'scheduled'};
+  offPkgModal();
+});
+function offPkSetSrc(v){
+  offReadPk();
+  OFF_DPK.source = v || null;
+  const b = v ? offBundle(v) : null;
+  if(b){ OFF_DPK.lines = b.lines.map(l => ({sid:l.sid, qty:1})); OFF_DPK.ic = b.ic; OFF_DPK.c = b.c; }
+  offPkgModal();
+}
+action('off-pkline', d => {
+  offReadPk();
+  const i = OFF_DPK.lines.findIndex(l => l.sid === d.sid);
+  if(i < 0) OFF_DPK.lines.push({sid:d.sid, qty:1}); else OFF_DPK.lines.splice(i,1);
+  offPkgModal();
+});
+action('off-pkunit', d => {
+  offReadPk();
+  const i = OFF_DPK.units.indexOf(d.u);
+  if(i < 0) OFF_DPK.units.push(d.u); else OFF_DPK.units.splice(i,1);
+  offPkgModal();
+});
+action('off-pkself', () => { offReadPk(); OFF_DPK.selfServe = !OFF_DPK.selfServe; offPkgModal(); });
+action('off-pksave', d => {
+  offReadPk();
+  if(!OFF_DPK.n.trim()){ toast('Give the package a name'); return; }
+  if(!OFF_DPK.lines.length){ toast('A package needs at least one product in it'); return; }
+  if(!OFF_DPK.units.length){ toast('Choose at least one unit'); return; }
+  OFF_DPK.status = d.to;
+  OFF_PKGS.unshift(OFF_DPK);
+  const p = OFF_DPK; OFF_DPK = null;
+  closeAll(); go('packages');
+  toast(`${esc(p.n)} ${d.to === 'open' ? 'is open — invite people to it' : 'scheduled for ' + offFmt(p.from)}`);
+});
+
+/* ============================ the invitation ============================
+   The composer, the email as the recipient sees it, and the confirmation page
+   the link opens. All three are one state object so the preview cannot drift
+   from what would be sent.
+   ==================================================================== */
+
+let INV = {kind:'', emails:'anna.berger@northwind.example\nluca.rossi@northwind.example',
+           pkg:'pkg-pmo', mode:'oneclick', from:'2026-09-01', to:'2026-10-31', msg:'', name:''};
+
+function offInvRead(){
+  const v = id => { const el = document.getElementById(id); return el ? el.value : undefined; };
+  const e = v('ivEmails'); if(e !== undefined) INV.emails = e;
+  const m = v('ivMsg');    if(m !== undefined) INV.msg = m;
+  const n = v('ivName');   if(n !== undefined) INV.name = n;
+}
+const offInvList = () => INV.emails.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+
+function offInvSetPkg(v){ offInvRead(); INV.pkg = v; const p = offPkg(v); if(p){ INV.from = p.from; INV.to = p.to; } openInvite(INV.kind); }
+function offInvSetMode(v){ offInvRead(); INV.mode = v; openInvite(INV.kind); }
+
+openInvite = function(kind){
+  INV.kind = kind || '';
+  const isAdmin = kind === 'admin';
+  const pk = offPkg(INV.pkg);
+  const modes = [
+    ['oneclick', 'One click, from inside the email',
+     `They press one button in the email and land on a confirmation page that completes the enrolment. No password, no form, no waiting for them to find the hub. Link valid ${OFF_RULES.tokenDays} days, single use.`],
+    ['register', 'Register first, then redeem',
+     'The classic path. They create or link a PMI account, then find the assigned product on their dashboard and redeem it. More steps, and the drop-off is between them.']
+  ];
+  openModal(`
+    <div class="modal-h"><h3 style="font-size:16px">Invite ${isAdmin ? 'an administrator or reporter' : 'people'}</h3>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:3px">Invitees receive a branded email. What they have to do next is the choice below, and it is the whole difference between a campaign that lands and one that sits unopened.</p></div>
+    <div class="modal-b">
+      <div class="field"><label for="ivEmails">Email addresses</label>
+        <textarea id="ivEmails" placeholder="one per line, or comma separated">${esc(INV.emails)}</textarea>
+        <div class="hint">${offInvList().length} address${offInvList().length===1?'':'es'} · up to 500 per invitation. For larger volumes use bulk upload.</div></div>
+      <div class="f2">
+        <div class="field"><label>Role</label><select class="sel"><option ${isAdmin?'':'selected'}>Learner</option><option ${isAdmin?'selected':''}>Administrator</option><option>Reporter</option></select></div>
+        <div class="field"><label>Agreement</label><select class="sel">${AGREEMENTS.filter(a=>a.status==='Active').map(a=>`<option>${esc(a.id)} — ${esc(a.name.split('—')[1]||a.name)}</option>`).join('')}</select></div>
+      </div>
+
+      <div class="field"><label for="ivPkg">What they get</label>
+        <select class="sel" id="ivPkg" onchange="offInvSetPkg(this.value)">
+          <option value="">Assign products directly, no package</option>
+          ${OFF_PKGS.filter(p => p.status !== 'closed').map(p => `<option value="${esc(p.id)}" ${INV.pkg===p.id?'selected':''}>${esc(p.n)}</option>`).join('')}
+        </select>
+        ${pk ? `<div class="hint">${pk.lines.map(l => esc((SOLUTIONS.find(x=>x.id===l.sid)||{n:l.sid}).n.split('—')[0].trim())).join(' · ')} — ${pk.seats - pk.taken} of ${pk.seats} seats left, window ${offWindow(pk)}${pk.selfServe ? '' : ` · every acceptance routes to ${esc(pk.approver)}`}</div>`
+             : `<div class="hint">Without a package there is nothing for a one-click link to enrol into, so the classic path is used.</div>`}
+      </div>
+
+      ${pk ? `
+      <div class="field"><label>How they accept</label>
+        <fieldset class="optlist" style="border:none;padding:0;margin:0"><legend class="sr-only">Acceptance method</legend>
+        ${modes.map(m => `
+          <label class="opt">
+            <input type="radio" name="invmode" value="${m[0]}" ${INV.mode===m[0]?'checked':''} onchange="offInvSetMode('${m[0]}')">
+            <span class="mk" aria-hidden="true"><i></i></span>
+            <span><span class="ot">${esc(m[1])}</span><span class="od">${esc(m[2])}</span></span>
+          </label>`).join('')}
+        </fieldset>
+      </div>
+      ${INV.mode === 'oneclick' ? `
+      <div class="notice info" style="margin-bottom:16px">${svg('shield',16)}<div><b>The click does not enrol — the confirmation does.</b> Mail security scanners fetch every link in an inbound message before it reaches the recipient. The link opens a page; the enrolment completes there, so a scanner cannot enrol anyone or burn a seat. Reversible for ${OFF_RULES.undoHours} hours.</div></div>`
+      : `<div class="notice warn" style="margin-bottom:16px">${svg('warn',16)}<div>On the last comparable campaign this path enrolled <b>17%</b> of those invited against <b>52%</b> for one-click. Illustrative figures — but the gap is the reason the option exists.</div></div>`}
+      ` : ''}
+
+      <div class="field"><label for="ivName">Campaign name</label><input class="txt" id="ivName" value="${esc(INV.name || (pk ? pk.n : ''))}"></div>
+      <div class="field" style="margin-bottom:0"><label for="ivMsg">Personal message (optional)</label>
+        <textarea id="ivMsg" placeholder="Appears under your organisation's standard welcome message.">${esc(INV.msg)}</textarea></div>
+    </div>
+    <div class="modal-f">
+      <button class="btn btn-primary" data-act="off-invsend">Send ${offInvList().length ? plural(offInvList().length, 'invitation') : 'invitations'}</button>
+      <button class="btn btn-ghost" data-act="off-mail">${svg('mail',15)} Preview the email</button>
+      <span class="spacer"></span>
+      <button class="btn btn-quiet" onclick="closeAll();openBulk()">Bulk upload</button>
+      <button class="btn btn-quiet" onclick="closeAll()">Cancel</button>
+    </div>`);
+};
+action('off-newcmp', d => {
+  if(d && d.pkg) INV.pkg = d.pkg;
+  const p = offPkg(INV.pkg);
+  if(p){ INV.from = p.from; INV.to = p.to; INV.name = p.n; }
+  openInvite();
+});
+action('off-invsend', () => {
+  offInvRead();
+  const list = offInvList();
+  if(!list.length){ toast('Add at least one address'); return; }
+  const pk = offPkg(INV.pkg);
+  const id = 'CMP-' + (1044 + OFF_CAMPAIGNS.length);
+  OFF_CAMPAIGNS.unshift({
+    id, n: INV.name || (pk ? pk.n : 'Direct assignment'), pkg: INV.pkg, mode: pk ? INV.mode : 'register',
+    audience: pk ? offUnitNames(pk.units) : 'Named addresses',
+    sent:list.length, delivered:list.length, opened:0, enrolled:0, expired:0, undone:0,
+    from: INV.from, to: INV.to, status:'Running', by:'Jordan Avery'
+  });
+  closeAll();
+  if(VIEW === 'packages' || VIEW === 'people') go(VIEW); else go('packages');
+  toast(`${plural(list.length,'invitation')} sent · campaign ${id}${pk && INV.mode === 'oneclick' ? ' · one-click links valid ' + OFF_RULES.tokenDays + ' days' : ''}`);
+});
+
+/* ---------- the email, as the person receives it ---------- */
+const OFF_TOKEN = 'eyJjbXAiOiJDTVAtMTA0MyIsInAiOiJwa2ctcG1vIn0.9f41c7e2';
+function offMailHTML(pk, mode, msg){
+  const items = pk ? pk.lines.map(l => (SOLUTIONS.find(x => x.id === l.sid) || {n:l.sid}).n) : [];
+  return `
+  <div class="mailwrap">
+    <div class="mailmeta">
+      <b>From</b> PMI Enterprise <span class="mono">&lt;no-reply@pmi.example&gt;</span> on behalf of ${esc(ORG.name)}<br>
+      <b>To</b> ${esc(offInvList()[0] || 'anna.berger@northwind.example')}<br>
+      <b>Subject</b> ${esc(pk ? pk.n : 'Your PMI access at ' + ORG.name)} — your place is reserved
+    </div>
+    <div class="mailrule"></div>
+    <div class="mailbody">
+      <div class="maillogo">${esc(ORG.name)} · with PMI</div>
+      <h4>${esc(pk ? pk.n : 'Your PMI access is ready')}</h4>
+      <p>${esc(pk ? pk.d : 'Your organisation has assigned you access to PMI learning and credentials.')}</p>
+      ${items.length ? `<p style="margin-bottom:14px"><b>What is reserved for you</b><br>${items.map(esc).join('<br>')}</p>` : ''}
+      ${msg ? `<p style="padding:12px 14px;background:#F7F4EF;border-radius:9px;font-style:italic">${escML(msg)}</p>` : ''}
+      ${mode === 'oneclick' ? `
+        <p style="margin:18px 0 10px"><button class="mailbtn" data-act="off-land">Start now — one click</button></p>
+        <p style="font-size:11.5px;color:#5A5A6E;margin-bottom:16px">One press. You will see a confirmation page, and that is it — no password to set here, no form to fill.</p>`
+      : `
+        <p style="margin:18px 0 10px"><button class="mailbtn" data-act="off-land" data-mode="register">Create your account</button></p>
+        <p style="font-size:11.5px;color:#5A5A6E;margin-bottom:16px">You will create or link a PMI account, then find this waiting on your dashboard.</p>`}
+      <p style="font-size:12px;color:#5A5A6E;margin-bottom:0">
+        ${pk ? `Open until ${offFmt(pk.to)}. ` : ''}This link is for you alone and can be used once.</p>
+    </div>
+    <div class="mailfoot">
+      Sent by PMI on behalf of ${esc(ORG.name)}. The link expires after ${OFF_RULES.tokenDays} days; ask your administrator for a new one if it does.
+      Accepting reserves a seat — you still choose for yourself, at first sign-in, what your employer can see about your progress.
+    </div>
+  </div>`;
+}
+action('off-mail', d => {
+  offInvRead();
+  let pk = offPkg(INV.pkg), mode = INV.mode, msg = INV.msg;
+  if(d && d.cid){
+    const c = OFF_CAMPAIGNS.find(x => x.id === d.cid);
+    if(c){ pk = offPkg(c.pkg); mode = c.mode; msg = ''; }
+  }
+  openModal(`
+    <div class="modal-h"><h3 style="font-size:16px">The invitation, as it arrives</h3>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:3px">Press the button in the message to walk the recipient's path — it is live in this prototype.</p></div>
+    <div class="modal-b">${offMailHTML(pk, mode, msg)}</div>
+    <div class="modal-f">
+      <button class="btn btn-ghost" onclick="closeAll()">Close</button>
+      <span class="spacer"></span>
+      <button class="btn btn-quiet" onclick="toast('Test message sent to jordan.avery@northwind.example')">Send myself a test</button>
+    </div>`);
+});
+
+/* ---------- what the link opens ---------- */
+function offLandingShell(inner){
+  return `
+    <div class="modal-b">
+      <div class="landing">
+        <div class="landbar">${svg('lock',12)} <span>hub.${esc(ORG.name.toLowerCase().split(' ')[0])}.pmi.example/enrol?t=${esc(OFF_TOKEN)}</span></div>
+        <div class="landbody">${inner}</div>
+      </div>
+    </div>`;
+}
+action('off-land', d => {
+  const register = d && d.mode === 'register';
+  openModal(`
+    <div class="modal-h"><h3 style="font-size:16px">${register ? 'Registration' : 'One-click enrolment'}</h3>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:3px">${register ? 'The classic path, for comparison.' : 'The page the link opens. The enrolment completes here, not on the click.'}</p></div>
+    ${offLandingShell(`
+      <span style="width:40px;height:40px;border-radius:50%;background:var(--line-soft);display:inline-grid;place-items:center;color:var(--muted)">${svg('key',20)}</span>
+      <h4>Checking your link…</h4>
+      <p>Single-use token, issued to this address ${offDays('2026-08-30') * -1} days ago and valid for ${OFF_RULES.tokenDays}.</p>`)}
+    <div class="modal-f"><button class="btn btn-quiet" onclick="closeAll()">Cancel</button></div>`);
+  setTimeout(() => register ? offLandRegister() : offLandEnrolled(), 750);
+});
+function offLandEnrolled(){
+  const pk = offPkg(INV.pkg) || OFF_PKGS[0];
+  const items = pk.lines.map(l => (SOLUTIONS.find(x => x.id === l.sid) || {n:l.sid}).n);
+  openModal(`
+    <div class="modal-h"><h3 style="font-size:16px">One-click enrolment</h3>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:3px">Two seconds, one page, and a seat is drawn.</p></div>
+    ${offLandingShell(`
+      <span style="width:44px;height:44px;border-radius:50%;background:var(--good-soft);color:#166F4A;display:inline-grid;place-items:center">${svg('check',22)}</span>
+      <h4>You are in</h4>
+      <p style="margin-bottom:12px"><b>${esc(pk.n)}</b><br>${items.map(esc).join('<br>')}</p>
+      <p style="margin-bottom:14px">Your seat is reserved${pk.approver && !pk.selfServe ? ` and has gone to ${esc(pk.approver)} for approval` : ''}. Nothing else is needed from you today.</p>
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:6px">
+        <button class="mailbtn" onclick="closeAll();toast('The learner lands on their dashboard')">Open my dashboard</button>
+        <button class="mailbtn sec" data-act="off-undo">This was not for me — undo</button>
+      </div>
+      <p style="margin-top:16px;font-size:11.5px">Reversible for ${OFF_RULES.undoHours} hours. Your progress stays private until you choose otherwise at first sign-in.</p>`)}
+    <div class="modal-f">
+      <button class="btn btn-ghost" onclick="closeAll()">Close</button>
+      <span class="spacer"></span>
+      <span class="sub" style="font-size:11.5px">Prototype — nothing is provisioned</span>
+    </div>`);
+  const pkg = pk, c = OFF_CAMPAIGNS.find(x => x.pkg === pkg.id && x.status === 'Running');
+  if(c){ c.opened++; c.enrolled++; }
+  if(pkg.taken < pkg.seats) pkg.taken++;
+}
+function offLandRegister(){
+  openModal(`
+    <div class="modal-h"><h3 style="font-size:16px">Registration</h3>
+      <p style="font-size:12.5px;color:var(--muted);margin-top:3px">Four screens before anything is reserved. This is what one-click removes.</p></div>
+    ${offLandingShell(`
+      <span style="width:44px;height:44px;border-radius:50%;background:var(--line-soft);color:var(--ink-2);display:inline-grid;place-items:center">${svg('users',22)}</span>
+      <h4>Create or link a PMI account</h4>
+      <p style="margin-bottom:14px">Then verify the address, set a password, accept the terms, find the assigned product on the dashboard and redeem it.</p>
+      <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+        <button class="mailbtn" onclick="closeAll();toast('Four more screens in the real journey — the prototype stops here')">Continue</button>
+      </div>
+      <p style="margin-top:16px;font-size:11.5px">Illustrative: 17% of invitees completed this path against 52% for one-click on a comparable campaign.</p>`)}
+    <div class="modal-f"><button class="btn btn-ghost" onclick="closeAll()">Close</button></div>`);
+}
+action('off-undo', () => {
+  const pk = offPkg(INV.pkg) || OFF_PKGS[0];
+  const c = OFF_CAMPAIGNS.find(x => x.pkg === pk.id && x.status === 'Running');
+  if(c && c.enrolled > 0){ c.enrolled--; c.undone++; }
+  if(pk.taken > 0) pk.taken--;
+  closeAll();
+  if(VIEW === 'packages' || VIEW === 'people') go(VIEW);
+  toast('Enrolment reversed — the seat is back in the pool and the record shows it was undone');
+});
+
+/* ---------- People & Access → Invitations picks up the campaign layer ---------- */
+function offInviteCard(){
+  const running = OFF_CAMPAIGNS.filter(c => c.status === 'Running');
+  const oneclick = running.filter(c => c.mode === 'oneclick');
+  const sent = running.reduce((s,c) => s + c.sent, 0), enr = running.reduce((s,c) => s + c.enrolled, 0);
+  return `
+  <div class="card" style="margin-top:16px">
+    <div class="card-h"><div><h3>One-click enrolment</h3>
+      <div class="sub">An invitation that carries a package can be accepted from inside the email — no account, no form, no dashboard hunt</div></div>
+      <div class="right"><button class="btn btn-sm btn-ghost" onclick="go('packages')">${svg('gift',13)} Packages &amp; campaigns</button></div></div>
+    <div class="card-b">
+      <div class="grid g-3" style="margin-bottom:14px">
+        <div><div class="sub">Running campaigns</div><div class="mono" style="font-size:20px;font-weight:750">${running.length}</div><div class="sub">${oneclick.length} using one-click</div></div>
+        <div><div class="sub">Invitations out</div><div class="mono" style="font-size:20px;font-weight:750">${sent.toLocaleString('en-GB')}</div><div class="sub">across those campaigns</div></div>
+        <div><div class="sub">Enrolled from the email</div><div class="mono" style="font-size:20px;font-weight:750">${enr.toLocaleString('en-GB')}</div><div class="sub">${sent ? Math.round(enr/sent*100) : 0}% of those invited</div></div>
+      </div>
+      <ul class="list-clean">
+        ${OFF_TOKEN_RULES.slice(0,2).map(r => `<li class="li"><span class="ic">${svg(r[0],15)}</span>
+          <span style="flex:1"><span class="t">${esc(r[1])}</span><span class="d">${esc(r[2])}</span></span></li>`).join('')}
+      </ul>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+        <button class="btn btn-sm btn-primary" data-act="off-newcmp">${svg('mail',13)} Send a campaign</button>
+        <button class="btn btn-sm btn-ghost" data-act="off-mail">Preview the email</button>
+      </div>
+    </div>
+  </div>`;
+}
+const _vPeopleV12 = VIEWS.people;
+VIEWS.people = () => _vPeopleV12() + (STATE.peopleTab === 'invites' ? offInviteCard() : '');
+
+/* ---------- navigation ----------
+   The administrator gets a view because packages are an access object, not a
+   commercial one: they decide who may take what, which is what the rest of that
+   group is about. The PMI role gets one under Commercial, next to the money.  */
+(function offNav(){
+  const acc = (NAV_BY_ROLE.admin || []).find(g => g.g === 'Access & entitlements');
+  if(acc && !acc.items.some(i => i.id === 'packages'))
+    acc.items.push({id:'packages', n:'Packages & campaigns', ic:'gift'});
+
+  if(!ALSO_ALLOWED.sponsor.includes('packages')) ALSO_ALLOWED.sponsor.push('packages');
+  if(!ALSO_ALLOWED.manager.includes('packages')) ALSO_ALLOWED.manager.push('packages');
+  if(typeof OPS_VIEWS !== 'undefined' && !OPS_VIEWS.some(v => v.id === 'packages'))
+    OPS_VIEWS.splice(2, 0, {id:'packages', n:'Packages & campaigns', ic:'gift'});
+
+  if(typeof PMI_ON !== 'undefined' && PMI_ON && NAV_BY_ROLE.pmi){
+    const com = NAV_BY_ROLE.pmi.find(g => g.g === 'Commercial');
+    if(com && !com.items.some(i => i.id === 'poffers'))
+      com.items.push({id:'poffers', n:'Offers & promotions', ic:'tag'});
+  }
+})();
+
+/* ---------- a v11 bug found while testing this build ----------
+   VIEWS.myteam reads unitById(myScope()).people. The Sponsor's scope is
+   'enterprise', which is not a unit, so unitById returns null and the view
+   threw — a blank screen and a console error for any Sponsor who reached
+   My Team, which ALSO_ALLOWED.sponsor permits. Guarded rather than removed,
+   because the honest answer is that this view belongs to a role with a unit. */
+const _vMyteamV12 = VIEWS.myteam;
+VIEWS.myteam = () => {
+  if(unitById(typeof myScope === 'function' ? myScope() : null)) return _vMyteamV12();
+  return `
+  <div class="pagehead"><div>
+    <div class="crumbs">Not scoped to you</div>
+    <h1>My team</h1>
+    <p class="sub">This view is a Capability Manager's, and it is scoped to one unit. Your scope is the whole organisation, so there is no single team to show.</p>
+  </div></div>
+  <div class="card"><div class="card-b">
+    <div class="notice info" style="margin-bottom:14px">${svg('info',16)}<div>The enterprise-wide equivalents are <b>Organisation &amp; Access</b> for who administers what, and <b>Reports &amp; Analytics</b> for adoption by unit.</div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="go('orgaccess')">${svg('layers',15)} Organisation &amp; Access</button>
+      <button class="btn btn-ghost" onclick="go('reports')">${svg('chart',15)} Reports &amp; Analytics</button>
+    </div>
+  </div></div>`;
+};
+
 /* ============================ INIT ============================ */
 document.addEventListener('keydown', e=>{
   if(e.key==='Escape'){ closeAll(); if(document.activeElement) document.activeElement.blur(); }
