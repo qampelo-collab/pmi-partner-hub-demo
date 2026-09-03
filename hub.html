@@ -16507,5 +16507,124 @@ paintBasketCount();
 renderNav();
 go('dashboard');
 </script>
+
+<!-- ============================ ACCESS GATE ============================
+     A password overlay in front of the hub. It is deliberately cosmetic:
+     the password lives in this file, so anyone who opens the source can
+     read it. It stops a forwarded link from opening the hub, nothing more.
+     Change the password on the GATE_PW line below.
+     Remove this whole block to publish the hub without a gate.
+=================================================================== -->
+<style>
+#pmiGate{
+  position:fixed; inset:0; z-index:2147483000; display:flex;
+  align-items:center; justify-content:center; padding:24px;
+  background:var(--bg,#F7F4EF);
+}
+#pmiGate .pgate-card{
+  display:block; width:100%; max-width:380px; background:var(--surface,#fff);
+  border:1px solid var(--line,#E3DED5); border-radius:var(--radius-lg,14px);
+  box-shadow:var(--shadow-lg,0 18px 50px rgba(32,15,59,.18));
+  padding:28px 26px 24px;
+}
+#pmiGate .pgate-lock{
+  width:36px; height:36px; border-radius:10px; display:flex;
+  align-items:center; justify-content:center; margin-bottom:16px;
+  background:var(--violet-soft,#F1EBFB); color:var(--violet,#4F17A8);
+}
+#pmiGate h1{ font-size:17px; line-height:1.3; margin:0 0 6px; letter-spacing:-.01em }
+#pmiGate p{ font-size:13px; color:var(--muted,#5A5A6E); margin:0 0 18px }
+#pmiGate label{ display:block; font-size:12px; font-weight:600; margin-bottom:6px }
+#pmiGate input{
+  width:100%; height:38px; padding:0 11px; font:inherit; font-size:14px;
+  color:var(--ink,#200F3B); background:var(--surface,#fff);
+  border:1px solid var(--line,#E3DED5); border-radius:var(--radius,10px);
+}
+#pmiGate input:focus{ outline:2px solid var(--violet,#4F17A8); outline-offset:1px; border-color:transparent }
+#pmiGate button{
+  width:100%; height:38px; margin-top:12px; font:inherit; font-size:14px; font-weight:600;
+  color:#fff; background:var(--violet,#4F17A8); border:0;
+  border-radius:var(--radius,10px); cursor:pointer;
+}
+#pmiGate button:hover{ background:var(--violet-2,#6B32C9) }
+#pmiGate .pgate-err{
+  font-size:12px; color:var(--crit,#C0301C); margin-top:10px; min-height:16px;
+}
+#pmiGate .pgate-foot{
+  font-size:11px; color:var(--muted,#5A5A6E); margin:16px 0 0;
+  padding-top:14px; border-top:1px solid var(--line-soft,#EFEAE2);
+}
+</style>
+<div id="pmiGate" role="dialog" aria-modal="true" aria-labelledby="pmiGateTitle">
+  <div class="pgate-card">
+    <div class="pgate-lock" aria-hidden="true">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2"></rect>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+      </svg>
+    </div>
+    <h1 id="pmiGateTitle">PMI Enterprise Partner Hub</h1>
+    <p>This prototype is shared privately. Enter the access password to continue.</p>
+    <label for="pmiGateInput">Access password</label>
+    <input id="pmiGateInput" type="password" autocomplete="off" spellcheck="false"
+           autocapitalize="off" aria-describedby="pmiGateErr">
+    <button id="pmiGateBtn" type="button">Open the hub</button>
+    <div class="pgate-err" id="pmiGateErr" role="alert"></div>
+    <p class="pgate-foot">Interactive prototype. All figures shown are illustrative.</p>
+  </div>
+</div>
+<script>
+(function(){
+  var GATE_PW = 'northwind2026';        /* <- change the password here */
+  var KEY = 'pmiHubGate';
+
+  var gate = document.getElementById('pmiGate');
+  var input = document.getElementById('pmiGateInput');
+  var btn   = document.getElementById('pmiGateBtn');
+  var err   = document.getElementById('pmiGateErr');
+  var html  = document.documentElement;
+  var prevOverflow = html.style.overflow;
+
+  function unlock(remember){
+    if(remember){ try{ sessionStorage.setItem(KEY, '1'); }catch(e){} }
+    document.removeEventListener('focusin', keepFocus, true);
+    html.style.overflow = prevOverflow;
+    if(gate && gate.parentNode) gate.parentNode.removeChild(gate);
+  }
+
+  var already = false;
+  try{ already = sessionStorage.getItem(KEY) === '1'; }catch(e){}
+  if(already){ unlock(false); return; }
+
+  html.style.overflow = 'hidden';
+
+  function keepFocus(e){
+    if(gate && !gate.contains(e.target)){ e.stopPropagation(); input.focus(); }
+  }
+  document.addEventListener('focusin', keepFocus, true);
+
+  function submit(){
+    if(input.value === GATE_PW){ unlock(true); return; }
+    err.textContent = 'That password is not correct.';
+    input.value = '';
+    input.focus();
+  }
+
+  btn.addEventListener('click', submit);
+  input.addEventListener('keydown', function(e){
+    if(e.key === 'Enter'){ e.preventDefault(); e.stopPropagation(); submit(); }
+    if(e.key === 'Escape'){ e.stopPropagation(); }
+    err.textContent = '';
+  });
+
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', function(){ setTimeout(function(){ input.focus(); }, 0); });
+  } else {
+    setTimeout(function(){ input.focus(); }, 0);
+  }
+})();
+</script>
+<!-- ========================== END ACCESS GATE ========================== -->
 </body>
 </html>
