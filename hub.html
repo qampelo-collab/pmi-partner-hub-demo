@@ -1677,7 +1677,7 @@ body.rev-build .gsearch{max-width:260px}
   </div>
   <div class="gsearch" role="search">
     <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-    <input aria-label="Search" placeholder="Search solutions, learners, agreements, reports…    /" onkeydown="if(event.key==='Enter'){go('catalog');toast('Searching across catalog, people and agreements')}">
+    <input aria-label="Search" placeholder="Search solutions, learners, agreements, reports…    /" onkeydown="if(event.key==='Enter'){go(ROLE==='business'?'bshop':ROLE==='learner'?'ldiscover':'catalog');toast('Searching across catalog, people and agreements')}">
   </div>
   <div class="tb-right">
     <span class="envchip demo">Demo</span><span class="envchip">Closed B2B · SSO</span>
@@ -1716,6 +1716,16 @@ body.rev-build .gsearch{max-width:260px}
    PMI ENTERPRISE PARTNER HUB — Admin-facing prototype
    All data below is illustrative sample data.
    ============================================================ */
+
+/* ============================ THE DEMO CLOCK ============================
+   One date governs every relative statement in this file. Change this line
+   before a session and every day count, due date and "next run" follows.
+   ======================================================================= */
+const AS_OF = new Date('2026-09-10T09:00:00Z');
+const AS_OF_TXT = AS_OF.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
+const daysFrom = d => Math.round((new Date(d) - AS_OF)/86400000);
+const dPlus = n => new Date(AS_OF.getTime()+n*86400000)
+  .toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'});
 
 const ICON = {
   home:'<path d="M3 10.5L12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
@@ -1761,7 +1771,7 @@ const svg = (k,w=17)=>`<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill=
 const DOMAINS = [
   {id:'core',  name:'Core Project Management Excellence', short:'Core PM Excellence', color:'#4F17A8', icon:'award', count:0, desc:'Certifications, capability, governance'},
   {id:'ai',    name:'AI & Digital Transformation',        short:'AI & Digital',        color:'#05BFE0', icon:'ai',    count:0, desc:'CPMAI, Infinity, AI governance'},
-  {id:'constr',name:'Construction & Capital Projects',    short:'Construction',        color:'#BE9577', icon:'build', count:0, desc:'PMI-CP, giga-projects'},
+  {id:'constr', name:'Construction & Capital Projects',    short:'Construction',        color:'#BE9577', icon:'build', count:2, desc:'PMI-CP, giga-projects'},
   {id:'sust',  name:'Sustainability',                     short:'Sustainability',      color:'#00799E', icon:'leaf',  count:0, desc:'CSPP, responsible delivery'},
   {id:'pmo',   name:'PMO Excellence',                     short:'PMO Excellence',      color:'#FF610F', icon:'pmo',   count:0, desc:'PMOCP, maturity, transformation'},
   {id:'agile', name:'Agile & Enterprise Agility',         short:'Agile & Agility',     color:'#D5340B', icon:'agile', count:0, desc:'PMI-ACP, DA, transformation'}
@@ -1834,10 +1844,10 @@ const SOLUTIONS = [
   {id:'acp', vp:'credential', n:'PMI-ACP® — Agile Certified Practitioner', k:'cert', d:'agile', desc:'Multi-framework agile credential covering Scrum, Kanban, Lean, XP and hybrid delivery.', formats:['Cohort','VILT'], price:'$1,050', unit:'per learner (bundle)', owned:true, seats:'320 seats', tags:['Multi-framework']},
   {id:'pgmp', vp:'credential', n:'PgMP® — Program Management Professional', k:'cert', d:'core', desc:'Advanced credential for professionals coordinating multiple related projects toward strategic benefit.', formats:['Cohort','Mentored'], price:'$2,400', unit:'per learner', owned:false, tags:['Executive track']},
   {id:'pfmp', vp:'credential', n:'PfMP® — Portfolio Management Professional', k:'cert', d:'core', desc:'Portfolio-level credential linking investment decisions to enterprise strategy and benefit realisation.', formats:['Cohort','Mentored'], price:'$2,600', unit:'per learner', owned:false, tags:['Executive track']},
-  {id:'rmp', vp:'credential', n:'PMI-RMP® — Risk Management Professional', k:'cert', d:'core', desc:'Specialist credential in risk identification, assessment, response and enterprise risk governance.', formats:['VILT','On-demand'], price:'$1,150', unit:'per learner', owned:false, tags:['Specialist']},
+  {id:'rmp', vp:'credential', n:'PMI-RMP® — Risk Management Professional', k:'cert', d:'core', desc:'Specialist credential in risk identification, assessment, response and enterprise risk governance.', formats:['VILT','On-demand'], price:'$1,150', unit:'per learner', owned:true, seats:'80 seats', tags:['Specialist']},
   {id:'sp', vp:'credential', n:'PMI-SP® — Scheduling Professional', k:'cert', d:'core', desc:'Advanced planning and scheduling credential for complex, resource-constrained delivery environments.', formats:['VILT'], price:'$1,150', unit:'per learner', owned:false, tags:['Specialist']},
-  {id:'pba', vp:'credential', n:'PMI-PBA® — Business Analysis', k:'cert', d:'core', desc:'Requirements, stakeholder and solution-evaluation credential bridging business and delivery.', formats:['VILT','On-demand'], price:'$1,150', unit:'per learner', owned:false, tags:['Specialist']},
-  {id:'cp', vp:'credential', n:'PMI-CP™ — Construction Professional', k:'cert', d:'constr', desc:'Four-course credential for built-environment and capital delivery: contracts, interface, risk and scope.', formats:['Cohort','VILT','On-demand'], price:'$2,950', unit:'per learner', owned:false, tags:['4 courses','Capital projects']},
+  {id:'pba', vp:'credential', n:'PMI-PBA® — Business Analysis', k:'cert', d:'core', desc:'Requirements, stakeholder and solution-evaluation credential bridging business and delivery.', formats:['VILT','On-demand'], price:'$1,150', unit:'per learner', owned:true, seats:'60 seats', tags:['Specialist']},
+  {id:'cp', vp:'credential', n:'PMI-CP™ — Construction Professional', k:'cert', d:'constr', desc:'Four-course credential for built-environment and capital delivery: contracts, interface, risk and scope.', formats:['Cohort','VILT','On-demand'], price:'$2,950', unit:'per learner', owned:true, seats:'120 seats', tags:['4 courses','Capital projects']},
   {id:'cpmai', vp:'credential', n:'PMI-CPMAI® — Cognitive Project Management in AI', k:'cert', d:'ai', desc:'Methodology certification for running AI and data-science projects through a six-phase, iterative lifecycle.', formats:['Cohort','VILT','On-demand'], price:'$2,200', unit:'per learner', owned:true, seats:'180 seats', tags:['6-phase method','Multi-language']},
   {id:'cspp', vp:'credential', n:'PMI-CSPP™ — Certified Sustainability Project Professional', k:'cert', d:'sust', desc:'Credential for embedding ESG and sustainability outcomes into project scope, design and reporting.', formats:['Cohort','VILT'], price:'$1,850', unit:'per learner', owned:false, tags:['ESG','New']},
   {id:'pmocp', vp:'credential', n:'PMI-PMOCP™ — PMO Certified Professional', k:'cert', d:'pmo', desc:'Credential for PMO leaders covering PMO design, value proposition, services and maturity.', formats:['Cohort','VILT'], price:'$1,950', unit:'per learner', owned:false, tags:['PMO leaders','New']},
@@ -1847,10 +1857,10 @@ const SOLUTIONS = [
   {id:'paths', vp:'capdev', n:'Role-Based Learning Journeys', k:'learn', d:'core', desc:'Curated journeys mapped to internal roles — delivery lead, programme manager, PMO analyst, sponsor, executive.', formats:['Blended'], price:'Included', unit:'with Training for Teams', owned:true, tags:['Configurable']},
   {id:'studyhall', vp:'credential', n:'Study Hall Enterprise', k:'learn', d:'core', desc:'Exam preparation and reinforcement with practice exams, scored readiness analytics and cohort-level insight for PMP and CPMAI.', formats:['Digital'], price:'$149', unit:'per learner / 90 days', owned:true, seats:'900 seats', tags:['Readiness analytics']},
   {id:'bootcamp', vp:'credential', n:'Certification Prep Bootcamps', k:'learn', d:'core', desc:'Intensive instructor-led preparation sprints with exam simulation, scheduled per cohort and per region.', formats:['ILT','VILT'], price:'$1,400', unit:'per cohort day', owned:false, tags:['Cohort']},
-  {id:'da', vp:'capdev', n:'Disciplined Agile® Programmes', k:'learn', d:'agile', desc:'DASM / DASSM / DAC pathways plus enterprise agility transformation support and way-of-working design.', formats:['ILT','VILT','On-demand'], price:'From $890', unit:'per learner', owned:false, tags:['DASM','DASSM']},
+  {id:'da', vp:'capdev', n:'Disciplined Agile® Programmes', k:'learn', d:'agile', desc:'DASM / DASSM / DAC pathways plus enterprise agility transformation support and way-of-working design.', formats:['ILT','VILT','On-demand'], price:'From $890', unit:'per learner', owned:true, seats:'250 DASM seats', tags:['DASM','DASSM']},
   {id:'aiseries', vp:'capdev', n:'PMIxAI Learning Series', k:'learn', d:'ai', desc:'Practitioner series on generative AI in delivery: prompt craft, AI-assisted planning, risk, ethics and adoption.', formats:['On-demand','VILT'], price:'$320', unit:'per learner', owned:true, seats:'2,000 seats', tags:['Popular']},
   {id:'sustpath', vp:'capdev', n:'Sustainability Learning Pathway', k:'learn', d:'sust', desc:'Sustainable project delivery and responsible sponsorship pathway aligned to CSPP and corporate ESG reporting.', formats:['On-demand','Blended'], price:'$560', unit:'per learner', owned:false, tags:['ESG']},
-  {id:'giga', vp:'capdev', n:'Capital & Giga-Project Excellence', k:'learn', d:'constr', desc:'Programme for infrastructure and capital delivery leaders: interface management, contracts, mega-project controls.', formats:['ILT','Blended'], price:'On application', unit:'per programme', owned:false, tags:['Capital projects']},
+  {id:'giga', vp:'capdev', owned:true, n:'Capital & Giga-Project Excellence', k:'learn', d:'constr', desc:'Programme for infrastructure and capital delivery leaders: interface management, contracts, mega-project controls.', formats:['ILT','Blended'], price:'On application', unit:'per programme', seats:'Programme under AGR-2377', tags:['Capital projects']},
   {id:'ttt', vp:'digital', n:'Train-the-Trainer', k:'learn', d:'core', desc:'Certify internal facilitators to deliver PMI courseware in-house under an approved delivery model.', formats:['ILT'], price:'$4,900', unit:'per trainer cohort', owned:false, tags:['Internal capability']},
   // Assessments
   {id:'opm', vp:'baseline', n:'OPM Diagnostic Assessment', k:'assess', d:'core', desc:'Enterprise diagnostic across delivery domains, producing a maturity baseline, benchmark and a prioritised improvement roadmap.', formats:['Guided','Consultant-led'], price:'From $38,000', unit:'per assessment', owned:true, seats:'In progress', tags:['Flagship','Benchmarked']},
@@ -2008,7 +2018,7 @@ const LEARNER = {
   email:'anna.berger@northwind.example', memberSince:'14 Feb 2025',
   goals:[
     {sid:'capm', kind:'Employer-assigned', due:'30 Sep 2026', daysLeft:41, progress:62, status:'On track', stc:'good', next:'Schedule your CAPM exam — eligibility already confirmed'},
-    {sid:'aiseries', kind:'Employer-assigned', due:'15 Oct 2026', daysLeft:56, progress:20, status:'Behind — exam prep not scheduled', stc:'warn', next:'Book your next PMIxAI module before 05 Sep'},
+    {sid:'aiseries', kind:'Employer-assigned', due:'15 Oct 2026', daysLeft:56, progress:20, status:'Behind — exam prep not scheduled', stc:'warn', next:'Book your next PMIxAI module before ${dPlus(12)}'},
     {sid:'studyhall', kind:'Self-selected', due:'Ongoing', daysLeft:null, progress:40, status:'In progress', stc:'good', next:'3 practice exams remaining this cycle'}
   ],
   records:[
@@ -2200,7 +2210,7 @@ VIEWS.dashboard = () => {
     <div>
       <div class="crumbs">Northwind Industries · Enterprise Agreement · EMEA</div>
       <h1>Good afternoon, Jordan</h1>
-      <p class="sub">Five active agreements, 6,000 contracted seats and three solution areas in flight. Two items need your approval and one allocation expires in 43 days.</p>
+      <p class="sub">Five active agreements, 6,000 contracted seats and three solution areas in flight. Two items need your approval and one allocation reaches its renewal window.</p>
     </div>
     <div class="actions">
       <button class="btn btn-ghost" onclick="go('reports')">${svg('chart',15)} Reports</button>
@@ -2297,7 +2307,7 @@ VIEWS.dashboard = () => {
           ${[
             ['warn','ORD-89020 awaiting purchase order','PMOCP pilot · 25 seats · $48,750','Action','crit'],
             ['clock','136 PMP seats unredeemed','Allocated >90 days on AGR-2291','Nudge','warn'],
-            ['calendar','AGR-2291 renewal window opens','01 Oct 2026 · 6,000 seats','43 days','warn'],
+            ['calendar','AGR-2291 renewal window opens','01 Oct 2026 · 6,000 seats',`${Math.max(0,daysFrom('2026-10-01'))} days`,'warn'],
             ['gauge','OPM Diagnostic at 68% response','1,412 of 2,080 · closes 12 Sep','Remind','warn'],
             ['users','9 invitations unaccepted','Sent >14 days ago','Resend','']
           ].map(r=>`<li class="li">
@@ -3274,7 +3284,7 @@ const ROLE_FRAMEWORK = [
   {role:'Executive Sponsor', pop:96, core:[], also:['Executive Briefings'], covered:58}
 ];
 const COHORTS = [
-  {n:'PMP Cohort 24 — EMEA', cred:'PMP', start:'07 Sep 2026', fmt:'VILT', seats:32, filled:30, inst:'PMI-approved', st:'Filling', stc:'warn'},
+  {n:'PMP Cohort 24 — EMEA', cred:'PMP', start:'05 Oct 2026', fmt:'VILT', seats:32, filled:30, inst:'PMI-approved', st:'Filling', stc:'warn'},
   {n:'PMP Cohort 25 — Americas', cred:'PMP', start:'21 Sep 2026', fmt:'VILT', seats:32, filled:11, inst:'PMI-approved', st:'Open', stc:''},
   {n:'CPMAI Wave 3 — Head Office', cred:'CPMAI', start:'12 Oct 2026', fmt:'ILT', seats:24, filled:24, inst:'PMI faculty', st:'Full', stc:'good'},
   {n:'PMI-CP Block A — Northern Hub', cred:'PMI-CP', start:'02 Nov 2026', fmt:'Blended', seats:20, filled:14, inst:'PMI faculty', st:'Open', stc:''},
@@ -3966,8 +3976,8 @@ VIEWS.reports = () => `
       <div class="card-b tight"><table class="tbl">
         <thead><tr><th>Report</th><th>Frequency</th><th>Recipients</th><th>Format</th><th>Next run</th><th>Status</th><th></th></tr></thead>
         <tbody>
-          <tr><td class="strong">Agreement Summary — all agreements</td><td>Monthly, 1st working day</td><td class="sub">j.avery@ · r.hale@ · procurement@</td><td>XLSX</td><td class="sub">01 Sep 2026</td><td><span class="chip sm good"><i></i>Active</span></td><td><button class="btn btn-sm btn-quiet" onclick="toast('Editing schedule')">Edit</button></td></tr>
-          <tr><td class="strong">Redemption &amp; Activation</td><td>Weekly, Monday 07:00</td><td class="sub">j.avery@ · divisional leads (6)</td><td>PDF</td><td class="sub">24 Aug 2026</td><td><span class="chip sm good"><i></i>Active</span></td><td><button class="btn btn-sm btn-quiet" onclick="toast('Editing schedule')">Edit</button></td></tr>
+          <tr><td class="strong">Agreement Summary — all agreements</td><td>Monthly, 1st working day</td><td class="sub">j.avery@ · r.hale@ · procurement@</td><td>XLSX</td><td class="sub">${dPlus(21)}</td><td><span class="chip sm good"><i></i>Active</span></td><td><button class="btn btn-sm btn-quiet" onclick="toast('Editing schedule')">Edit</button></td></tr>
+          <tr><td class="strong">Redemption &amp; Activation</td><td>Weekly, Monday 07:00</td><td class="sub">j.avery@ · divisional leads (6)</td><td>PDF</td><td class="sub">${dPlus(3)}</td><td><span class="chip sm good"><i></i>Active</span></td><td><button class="btn btn-sm btn-quiet" onclick="toast('Editing schedule')">Edit</button></td></tr>
           <tr><td class="strong">Certification Status</td><td>Quarterly</td><td class="sub">HR Learning distribution list</td><td>XLSX</td><td class="sub">01 Oct 2026</td><td><span class="chip sm good"><i></i>Active</span></td><td><button class="btn btn-sm btn-quiet" onclick="toast('Editing schedule')">Edit</button></td></tr>
           <tr><td class="strong">Infinity Adoption</td><td>Monthly</td><td class="sub">Digital Delivery Office</td><td>PDF</td><td class="sub">01 Sep 2026</td><td><span class="chip sm warn"><i></i>Paused</span></td><td><button class="btn btn-sm btn-quiet" onclick="toast('Schedule resumed')">Resume</button></td></tr>
         </tbody></table></div>
@@ -5644,7 +5654,7 @@ function runnerShell(ns, run, qs, opts){
       <label class="asm-hint" style="display:flex;align-items:center;gap:7px;cursor:pointer" onclick="toggleAuto()">
         <span class="toggle${AUTOADV?' on':''}" id="autoAdv"><i></i></span> Auto-advance
       </label>
-      <button class="btn btn-primary" onclick="${ns}Next()" ${ok?'':'style="opacity:.55"'}>
+      <button class="btn btn-primary" onclick="${ns}Next()" ${ok?'':'disabled style="opacity:.45;cursor:not-allowed" title="Answer this question, or use Skip"'}>
         ${isLast?'See results':'Next'} ${svg('arrowup',14)}
       </button>
     </div>
@@ -5698,7 +5708,14 @@ function asmNext(skip){
 }
 function asmPrev(){ if(ASM.idx>0){ ASM.idx--; asmPaint(); window.scrollTo({top:0,behavior:'smooth'}); } }
 function asmExit(){ toast('Progress saved — pick it up from Value Assessment whenever you want'); go('dashboard'); }
-function asmFinish(){ ASM.done=true; ASM.results=asmScore(); go('orgassess'); }
+const ASM_MIN = 4;   /* below this many answers a run has no result worth showing */
+function asmFinish(){
+  ASM.done=true;
+  ASM.thin = Object.keys(ASM.a||{}).length < ASM_MIN;
+  ASM.results=asmScore();
+  go('orgassess');
+  if(ASM.thin) toast('Too few answers for a reliable result — the report says so');
+}
 function asmStart(d){ asmNew(d); go('orgassess'); }
 function asmRestart(){ if(ASM){ASM=null;} go('orgassess'); }
 function asmRunner(){ const qs=asmQuestions();
@@ -5859,8 +5876,14 @@ function asmResults(){
   const scopeTxt = (scopeQ.opts.find(o=>o.v===ASM.a['org.scope'])||{}).t || 'Your scope';
   const top = R.priorities.slice(0,3);
   const covIn = R.inPlan.length, covAdd = R.toAdd.length, covTot = covIn+covAdd || 1;
+  const answered = Object.keys(ASM.a||{}).length;
 
   return `
+  ${ASM.thin ? `<div class="notice warn" style="margin-bottom:16px">${svg('alert',16)}<div>
+      <b>Not enough answers for a reliable result.</b> ${answered} question${answered===1?'':'s'} answered.
+      A score below the minimum is shown for completeness and should not be read as a capability picture.
+      <button class="btn btn-sm btn-ghost" style="margin-left:10px" onclick="asmRestart()">Start again</button>
+    </div></div>` : ''}
   <div class="pagehead">
     <div>
       <div class="crumbs">Manage · Organisation Value Assessment</div>
@@ -7576,7 +7599,11 @@ function navFor(role){
   if(role==='sponsor' && SHOW_OPS) nav.push({g:'Operational detail', items:OPS_VIEWS.slice()});
   return nav;
 }
+/* Views that belong to PMI and must never render for a customer profile,
+   whatever else the role is allowed. Checked before the sponsor catch-all. */
+const PMI_ONLY = ['pcockpit','paccount','pfinance','pgrowth','pplan','pask','poffers','capmap'];
 function canSee(v){
+  if(PMI_ONLY.includes(v) && ROLE!=='pmi') return false;
   if(ROLE==='learner') return NAV_LEARNER.some(g=>g.items.some(i=>i.id===v));
   const nav = NAV_BY_ROLE[ROLE]||[];
   if(nav.some(g=>g.items.some(i=>i.id===v))) return true;
@@ -7793,11 +7820,29 @@ function escalateReq(id){
 function decideEsc(id, ok){
   const e=ESCALATIONS.find(x=>x.id===id); if(!e) return;
   e.st = ok?'Approved':'Declined'; e.stc = ok?'good':'';
-  if(ok && e.linked){ const r=REQUESTS.find(x=>x.id===e.linked); if(r){ r.st='Pending'; approveReq(e.linked); } }
+  if(ok && e.linked){
+    const r=REQUESTS.find(x=>x.id===e.linked);
+    if(r){
+      /* A sponsor approving an escalation is also releasing the money for it.
+         Give the cost centre the headroom first, so the approval cannot report
+         success while the request silently stays pending. */
+      const cc=ccById(r.cc);
+      if(cc && cc.spent + r.amount > cc.budget){
+        const need = (cc.spent + r.amount) - cc.budget;
+        cc.budget += need; FUNDS.allocated += need;
+        const a=ADMINS.find(x=>x.scope===r.cc); if(a) a.budget = cc.budget;
+      }
+      r.st='Pending'; approveReq(e.linked);
+      if(r.st!=='Approved'){ e.st='Pending'; e.stc='warn'; toast('Could not release the funds — the request stays open'); return; }
+    }
+  }
+  if(!ok && e.linked){ const r=REQUESTS.find(x=>x.id===e.linked); if(r){ r.st='Declined'; r.note='Declined at escalation.'; } }
   if(ok && e.kind==='budget' && e.unit){ const c=ccById(e.unit); c.budget += e.amount; FUNDS.allocated += e.amount;
     const a=ADMINS.find(x=>x.scope===e.unit); if(a) a.budget = c.budget; }
-  if(ok && e.kind==='seats'){ if(SEATS.pmp) SEATS.pmp.pool += 20; }
-  if(ok && e.kind==='access'){ (ALSO_ALLOWED.admin||[]).push('reports'); }
+  if(ok && e.kind==='seats'){ const sid=e.sid||'acp'; if(SEATS[sid]) SEATS[sid].pool += (e.seats||20);
+    const cr=CERTS.find(c=>c.code==='PMI-ACP'); if(sid==='acp'&&cr) cr.purchased += (e.seats||20); }
+  if(ok && e.kind==='access'){ const v=e.view||'reports';
+    if(!(ALSO_ALLOWED.admin||[]).includes(v)) (ALSO_ALLOWED.admin||[]).push(v); }
   e.note = ok ? `Approved by ${myName()}.` : `Declined by ${myName()} — not a current capability priority.`;
   go('decisions');
   toast(ok ? `Approved — ${e.from} notified` : `Declined — ${e.from} sees the reason`);
@@ -8354,7 +8399,7 @@ function dashAdministrator(){
           tight.length?['warn','crit',`${tight[0].code} pool is ${pct(tight[0].allocated,tight[0].purchased)}% allocated`,'Nobody new can be registered once it is full. Reallocate lapsed seats or escalate for more.','openEscalate({kind:\'seats\',title:\'Additional '+tight[0].code+' seats\',ask:\'Approve additional '+tight[0].code+' seats\'})','Escalate']:null,
           ['upload','warn','Bulk import of 340 rows is waiting on validation','Twelve rows have a department that does not match the org structure.','openBulk()','Validate'],
           invited.length?['mail','warn',`${invited.length} invitations unaccepted`,'Sent more than fourteen days ago. A reminder recovers most of them.','toast(\'Reminders sent\')','Remind']:null,
-          ['clock','',`Allocation AGR-2291 expires in 43 days`,'1,064 allocated seats roll off unless the agreement is extended. Not your decision — but it is your warning to give.','openEscalate({kind:\'policy\',title:\'AGR-2291 expires in 43 days\',ask:\'Confirm renewal intent before allocations roll off\'})','Escalate'],
+          ['clock','',`Allocation AGR-2291 renews in ${Math.max(0,daysFrom('2027-03-31'))} days`,'1,064 allocated seats fall due for renewal unless the agreement is extended. Not your decision — but it is your warning to give.','openEscalate({kind:\'policy\',title:\'AGR-2291 expires in 43 days\',ask:\'Confirm renewal intent before allocations roll off\'})','Escalate'],
           disabled.length?['shield','',`${disabled.length} disabled accounts still hold entitlements`,'Recoverable seats sitting with people who have left.','toast(\'Reclaim queued for review\')','Reclaim']:null
         ].filter(Boolean).map(r=>`
           <li class="li"><span class="ic" style="background:${r[1]==='crit'?'var(--crit-soft)':(r[1]==='warn'?'var(--warn-soft)':'var(--bg)')};color:${r[1]==='crit'?'var(--crit)':(r[1]==='warn'?'#8A5E08':'var(--muted)')}">${svg(r[0],15)}</span>
@@ -10100,7 +10145,7 @@ go = function(v){
    than computed from the clock, so the seeded story never drifts.
    ========================================================================= */
 
-const TODAY = '23 Aug 2026';
+const TODAY = AS_OF_TXT;
 
 const AGE_BUCKETS = [
   {id:'current', n:'Not yet due', min:null, max:0,  color:'#166F4A'},
@@ -10160,16 +10205,16 @@ let PAYMENTS = [
 ];
 
 let CREDIT_NOTES = [
-  {id:'CN-2026-0033', inv:'INV-2026-0371', date:'29 Jul 2026', amount:4850,
+  {id:'CN-2026-0033', inv:'INV-2026-0371', date:'29 Jul 2026', amount:1788,
    reason:'12 Study Hall seats returned unused inside the 30-day grace period', status:'Applied'}
 ];
 
 /* an account statement is a derived object, not a stored one */
 const STATEMENT_PERIODS = [
-  {id:'2026-08', n:'August 2026',    opening:346150, invoiced:100200, paid:40000,  credits:0,    closing:406350, partial:true},
-  {id:'2026-07', n:'July 2026',      opening:340750, invoiced:191600, paid:54750,  credits:4850, closing:346150},
-  {id:'2026-06', n:'June 2026',      opening:222750, invoiced:118000, paid:0,      credits:0,    closing:340750},
-  {id:'2026-05', n:'May 2026',       opening:222750, invoiced:212400, paid:212400, credits:0,    closing:222750}
+  {id:'2026-08', n:'August 2026',    opening:304750, invoiced:100200, paid:94750,  credits:0,    closing:310200, partial:true},
+  {id:'2026-07', n:'July 2026',      opening:191938, invoiced:118000, paid:3400,   credits:1788, closing:304750},
+  {id:'2026-06', n:'June 2026',      opening:191938, invoiced:0,      paid:0,      credits:0,    closing:191938},
+  {id:'2026-05', n:'May 2026',       opening:0,      invoiced:212400, paid:20462,  credits:0,    closing:191938}
 ];
 
 /* ---------- disputes: routed, owned, with a first-response target ---------- */
@@ -10187,7 +10232,7 @@ const routeById = id => DISPUTE_ROUTES.find(r => r.id === id) || DISPUTE_ROUTES[
 let DISPUTES = [
   {id:'DSP-1204', inv:'INV-2026-0420', cat:'qty', by:'Nadia Farah', role:'admin', raised:'20 Aug 2026',
    detail:'The pilot was agreed for eight learners and the cohort ran with eight. This invoice bills twelve. The cohort register is attached.',
-   status:'With PMI', stc:'warn', team:'Entitlement Operations', firstResponseBy:'24 Aug 2026', holdsPayment:true,
+   status:'With PMI', stc:'warn', team:'Entitlement Operations', firstResponseBy:dPlus(2), holdsPayment:true,
    thread:[{who:'Nadia Farah', at:'20 Aug 2026', txt:'Raised — cohort register attached.'},
            {who:'PMI Entitlement Operations', at:'21 Aug 2026', txt:'Received. Checking the enrolment record against the agreement. First response by 24 Aug.'}]},
 
@@ -10252,9 +10297,9 @@ const bizInvBalance = i => Math.max(0, i.total - i.paid);
 const bizOutstanding = () => BIZ_INVOICES.reduce((s,i) => s + bizInvBalance(i), 0);
 
 /* ============================ BILLING — ENTERPRISE ============================ */
-const canSeeBilling = () => ['sponsor','billing','business'].includes(ROLE)
+const canSeeBilling = () => ['sponsor','billing'].includes(ROLE)
   || (ROLE === 'admin' && (myAdminRecord() || {}).billing === true);
-const canPay   = () => ['sponsor','billing','business'].includes(ROLE);
+const canPay   = () => ['sponsor','billing'].includes(ROLE);
 const canQuery = () => canSeeBilling();
 
 function invStatusChip(i){
@@ -10713,8 +10758,9 @@ defaultViewFor = function(role){ return role === 'billing' ? 'billing' : _defaul
 /* the guard has to know about billing access, not only about navigation */
 const _canSeeV6 = canSee;
 canSee = function(v){
+  if(PMI_ONLY.includes(v) && ROLE !== 'pmi') return false;
   if(v === 'billing') return canSeeBilling();
-  if(v === 'about' || v === 'capmap') return true;
+  if(v === 'about') return true;
   if(ROLE === 'billing') return (NAV_BY_ROLE.billing.some(g => g.items.some(i => i.id === v))) || ALSO_ALLOWED.billing.includes(v);
   return _canSeeV6(v);
 };
@@ -14162,7 +14208,7 @@ VIEWS.pfinance = () => {
             <i style="display:block;height:100%;width:${Math.round(r.v / domMax * 100)}%;background:${inkOf(r.d.color)}"></i></div>
           <b style="flex:none;width:90px;text-align:right;font-size:12.5px">${money0(r.v)}</b>
         </div>`).join('')}
-        <p class="hint" style="margin-top:10px">Three of the six strategic domains have never been bought here. That gap is the growth view, and it is worth more than the renewal.</p>
+        <p class="hint" style="margin-top:10px">Two of the six strategic domains have never been bought here. That gap is the growth view, and it is worth more than the renewal.</p>
       </div>
     </div>
   </div>
@@ -14379,7 +14425,7 @@ VIEWS.pplan = () => {
     </div>`
   : `
     <div class="notice violet" style="margin-bottom:18px">${svg('spark', 16)}
-      <div><b>AI-drafted, ${esc(AP.when)}.</b> Assembled from the account data in this hub and nothing else. Read it before it reaches a customer — a draft that sounds finished is the most dangerous kind.</div></div>
+      <div><b>Assembled ${esc(AP.when)}, not model-generated.</b> Written from the account data in this hub and nothing else. Read it before it reaches a customer — a draft that sounds finished is the most dangerous kind.</div></div>
     <div class="stack">
       ${AP.sections.map(s => `
         <div class="card">
@@ -14437,7 +14483,7 @@ function pAnswer(q){
     read.push('Request queue');
     const outside = REQUESTS.filter(r => { if(r.st !== 'Pending') return false; const s = SOLUTIONS.find(x => x.id === r.sid); return s && !s.owned; });
     a = `${outside.length} individual requests are for solutions outside the agreement: ${outside.map(r => { const s = SOLUTIONS.find(x => x.id === r.sid); return s ? s.n.split('—')[0].trim() : r.sid; }).join(', ')}.\n\n`
-      + `One was declined outright — PMI-CP for Sofia Novak in Mobility, on the grounds that it sits outside her role. Read that as a capital-projects capability question the organisation has not asked itself yet.\n\n`
+      + `One was declined outright — PMI-CP for Sofia Novak in Mobility, on the grounds that it sits outside her role. Read that against the live capital-projects addendum, which covers a different division. The organisation has not asked itself yet.\n\n`
       + `Individual demand is the cheapest qualification available. People asking with their own name attached have already made the internal case.`;
   } else {
     read.push('Account profile', 'Agreements', 'Adoption');
@@ -15198,10 +15244,10 @@ function offGiveaway(p){
 function offNeedsApproval(p){
   const r = [];
   if(p.kind === 'price' && p.lever === 'pct' && p.value > OFF_RULES.maxPct)
-    r.push(`${p.value}% is above the ${OFF_RULES.maxPct}% threshold a Partner Success Manager can approve alone`);
+    r.push(`${p.value}% is above the rate a Partner Success Manager can approve alone`);
   const g = offGiveaway(p);
   if(g > OFF_RULES.maxGiveaway)
-    r.push(`Exposure at full cap is ${money0(g)}, above the ${money0(OFF_RULES.maxGiveaway)} threshold`);
+    r.push(`Exposure at full cap is ${money0(g)}, above the configured ceiling`);
   return r;
 }
 
@@ -15354,13 +15400,13 @@ function offApprovalsTab(){
               <p style="font-size:12.5px;line-height:1.6;margin:0 0 12px"><b>Case made:</b> ${esc(p.why)}</p>
               <div class="f2" style="margin-bottom:10px">
                 <div><div class="sub">Exposure at full cap</div><div class="mono strong" style="font-size:16px">${money0(offGiveaway(p))}</div></div>
-                <div><div class="sub">Threshold</div><div class="mono" style="font-size:16px">${money0(OFF_RULES.maxGiveaway)} · ${OFF_RULES.maxPct}%</div></div>
+                <div><div class="sub">Threshold</div><div class="mono" style="font-size:16px">held as configuration</div></div>
               </div>
               <div style="display:flex;gap:8px;flex-wrap:wrap">
                 <button class="btn btn-sm btn-primary" data-act="off-approve" data-id="${esc(p.id)}">${svg('check',13)} Approve and publish</button>
                 <button class="btn btn-sm btn-quiet" data-act="off-reject" data-id="${esc(p.id)}">Reject</button>
               </div>
-            </div>`).join('') : `<div class="empty">Nothing waiting. A promotion at or below ${OFF_RULES.maxPct}% and under ${money0(OFF_RULES.maxGiveaway)} of exposure publishes without one.</div>`}
+            </div>`).join('') : `<div class="empty">Nothing waiting. A promotion inside the configured limits publishes without an approval.</div>`}
         </div>
       </div>
       ${decided.length ? `
@@ -15377,8 +15423,8 @@ function offApprovalsTab(){
         <div class="card-h"><h3>The rule</h3></div>
         <div class="card-b">
           <dl class="kv">
-            <dt>Approve alone up to</dt><dd class="mono">${OFF_RULES.maxPct}%</dd>
-            <dt>Exposure ceiling</dt><dd class="mono">${money0(OFF_RULES.maxGiveaway)}</dd>
+            <dt>Approve alone up to</dt><dd class="mono">the configured limit</dd>
+            <dt>Exposure ceiling</dt><dd class="mono">held as configuration</dd>
             <dt>Default stacking</dt><dd>${OFF_RULES.stackDefault ? 'Stacks' : 'Best offer only'}</dd>
           </dl>
           <p class="hint" style="margin-top:10px">Both numbers are data, not code. Moving them moves what a Partner Success Manager can do without asking, which is the point of having them in one place.</p>
@@ -15566,7 +15612,7 @@ action('off-bpreview', d => {
         <span class="oc-f"><s>${money0(p.gross)}</s><span class="oc-p">${money0(p.net)}</span>
           <span class="chip sm">Until ${offFmt(b.to)}</span></span>
       </div></div>
-      <p class="hint" style="margin-top:12px">Illustrative pricing. The customer's own volume tier still applies underneath — the bundle discount is not additive to it, the better of the two governs.</p>
+      <p class="hint" style="margin-top:12px">Illustrative pricing. The bundle rate is applied to each line as it enters the plan. The standing volume tier then applies to the plan as a whole.</p>
     </div>
     <div class="modal-f"><button class="btn btn-ghost" onclick="closeAll()">Close</button></div>`);
 });
@@ -15826,10 +15872,11 @@ action('off-toplan', d => {
   let added = 0;
   b.lines.forEach(l => {
     const s = SOLUTIONS.find(x => x.id === l.sid); if(!s) return;
-    const q = priceOf(s), unit = q && q.amt ? q.amt : 0;
+    const q = priceOf(s), list = q && q.amt ? q.amt : 0;
+    const unit = Math.round(list * (100 - b.pct) / 100);
     const ex = CART.find(c => c.sid === l.sid);
-    if(ex){ ex.qty = Math.max(ex.qty, l.qty); }
-    else { CART.push({sid:l.sid, qty:l.qty, term:s.k === 'assess' ? 'One-off' : '24 months', unit, note:b.n}); added++; }
+    if(ex){ ex.qty = Math.max(ex.qty, l.qty); ex.unit = Math.min(ex.unit, unit); ex.bundle = b.id; }
+    else { CART.push({sid:l.sid, qty:l.qty, term:s.k === 'assess' ? 'One-off' : '24 months', unit, list, bundle:b.id, note:b.n}); added++; }
   });
   const el = document.getElementById('cartCount'); if(el) el.textContent = CART.length;
   renderNav(); go('plan');
@@ -15840,7 +15887,8 @@ action('off-tobasket', d => {
   b.lines.forEach(l => {
     if(!SME_CATALOGUE.includes(l.sid)) return;
     const line = BASKET.find(x => x.sid === l.sid);
-    if(line) line.qty += l.qty; else BASKET.push({sid:l.sid, qty:l.qty, unit:bizUnit(l.sid)});
+    const bu = Math.round(bizUnit(l.sid) * (100 - b.pct) / 100);
+    if(line){ line.qty += l.qty; line.unit = Math.min(line.unit, bu); } else BASKET.push({sid:l.sid, qty:l.qty, unit:bu, bundle:b.id});
   });
   paintBasketCount();
   toast(`${esc(b.n)} added to your basket`);
